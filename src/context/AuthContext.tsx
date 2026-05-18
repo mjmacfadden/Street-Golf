@@ -56,96 +56,94 @@ const logToStorage = (message: string) => {
 };
 
 // ---------------------------------------------------------------------------
-// PKCE OAuth helpers — bypass Firebase's cross-origin iframe mechanism
-// (which Apple ITP blocks in PWA standalone mode on GitHub Pages hosting)
+// Google One Tap / FedCM — standalone PWA sign-in
+//
+// signInWithPopup → window.open() opens Safari (different OS process); postMessage
+//                   can't reach back to the standalone WebView.
+// signInWithRedirect → Apple ITP blocks the cross-origin iframe Firebase uses to
+//                      read the result back (app on github.io ≠ auth on firebaseapp.com).
+// PKCE → Google requires client_secret for Web Application clients even with PKCE
+//         (it's a server-side-only mechanism; we can't expose the secret client-side).
+// One Tap / FedCM → browser-native credential selector, no popup/redirect/iframe.
+//                   Supported on iOS 17+ WebKit (WKWebView). Returns id_token directly.
 // ---------------------------------------------------------------------------
 
-function pkceVerifier(): string {
-  const buf = new Uint8Array(32);
-  crypto.getRandomValues(buf);
-  return btoa(String.fromCharCode(...buf)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-}
-
-async function pkceChallenge(verifier: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
-  return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-}
-
-// The Google OAuth client ID is a public identifier — safe to hardcode.
-// (It ends up in the compiled JS bundle regardless, so gitignoring it provides no security benefit.)
+// Google OAuth client ID — public identifier, safe to hardcode in client code.
 const GOOGLE_OAUTH_CLIENT_ID =
   (import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID as string | undefined) ||
   '11862667875-ai1fo9pnp7ifovic9b9pp2gig99b1ogj.apps.googleusercontent.com';
 
-async function fetchGoogleClientId(): Promise<string | null> {
-  return GOOGLE_OAUTH_CLIENT_ID || null;
-}
-
-async function startPKCESignIn(): Promise<void> {
-  const clientId = await fetchGoogleClientId();
-  if (!clientId) throw new Error('Could not fetch Google OAuth client ID from Firebase config');
-
-  const verifier = pkceVerifier();
-  const challenge = await pkceChallenge(verifier);
-  const state = pkceVerifier(); // random CSRF nonce
-
-  // Use localStorage — sessionStorage can be cleared by WebKit on full-page navigations
-  localStorage.setItem('pkce_verifier', verifier);
-  localStorage.setItem('pkce_state', state);
-
-  // Redirect URI must be registered in Google Cloud Console:
-  // APIs & Services → Credentials → Web client (auto created by Google Service)
-  // → Authorized redirect URIs → add https://mjmacfadden.github.io/street-golf/
-  const redirectUri = `${window.location.origin}${window.location.pathname}`.replace(/\/$/, '') + '/';
-
-  const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-  url.searchParams.set('client_id', clientId);
-  url.searchParams.set('redirect_uri', redirectUri);
-  url.searchParams.set('response_type', 'code');
-  url.searchParams.set('scope', 'openid profile email');
-  url.searchParams.set('code_challenge', challenge);
-  url.searchParams.set('code_challenge_method', 'S256');
-  url.searchParams.set('state', state);
-  url.searchParams.set('prompt', 'select_account');
-
-  window.location.href = url.toString();
-}
-
-async function completePKCESignIn(code: string, state: string): Promise<void> {
-  const savedState = localStorage.getItem('pkce_state');
-  const verifier = localStorage.getItem('pkce_verifier');
-
-  localStorage.removeItem('pkce_state');
-  localStorage.removeItem('pkce_verifier');
-
-  if (state !== savedState) throw new Error('OAuth state mismatch — possible CSRF');
-  if (!verifier) throw new Error('PKCE verifier missing');
-
-  const clientId = await fetchGoogleClientId();
-  if (!clientId) throw new Error('Could not fetch Google OAuth client ID');
-
-  const redirectUri = `${window.location.origin}${window.location.pathname}`.replace(/\/$/, '') + '/';
-
-  const res = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id: clientId,
-      redirect_uri: redirectUri,
-      grant_type: 'authorization_code',
-      code,
-      code_verifier: verifier,
-    }),
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({})) as { error_description?: string; error?: string };
-    throw new Error(err.error_description || err.error || `Token exchange failed (${res.status})`);
+type GISCredentialResponse = { credential: string; select_by: string };
+type GISPromptNotification = {
+  isDisplayMoment(): boolean;
+  isDisplayed(): boolean;
+  isNotDisplayed(): boolean;
+  getNotDisplayedReason(): string;
+  isSkippedMoment(): boolean;
+  getSkippedReason(): string;
+  isDismissedMoment(): boolean;
+  getDismissedReason(): string;
+};
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize(cfg: {
+            client_id: string;
+            callback(r: GISCredentialResponse): void;
+            use_fedcm_for_prompt?: boolean;
+            itp_support?: boolean;
+            cancel_on_tap_outside?: boolean;
+          }): void;
+          prompt(cb?: (n: GISPromptNotification) => void): void;
+          cancel(): void;
+        };
+      };
+    };
   }
+}
 
-  const tokens = await res.json() as { id_token: string; access_token: string };
-  const credential = GoogleAuthProvider.credential(tokens.id_token, tokens.access_token);
-  await signInWithCredential(auth, credential);
+function loadGIS(): Promise<void> {
+  if (window.google?.accounts?.id) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('Failed to load Google Identity Services'));
+    document.head.appendChild(s);
+  });
+}
+
+function googleOneTap(clientId: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const finish = (fn: typeof resolve | typeof reject, v: Parameters<typeof resolve>[0] | Parameters<typeof reject>[0]) => {
+      if (done) return;
+      done = true;
+      (fn as (v: unknown) => void)(v);
+    };
+
+    window.google!.accounts.id.initialize({
+      client_id: clientId,
+      callback: (r: GISCredentialResponse) => finish(resolve, r.credential),
+      use_fedcm_for_prompt: true,
+      itp_support: true,
+      cancel_on_tap_outside: false,
+    });
+
+    window.google!.accounts.id.prompt((n: GISPromptNotification) => {
+      if (n.isNotDisplayed()) {
+        finish(reject, new Error(`One Tap not shown: ${n.getNotDisplayedReason()}`));
+      } else if (n.isSkippedMoment()) {
+        finish(reject, new Error(`One Tap skipped: ${n.getSkippedReason()}`));
+      }
+    });
+
+    // Safety timeout
+    setTimeout(() => finish(reject, new Error('One Tap timed out after 30s')), 30000);
+  });
 }
 
 
@@ -171,14 +169,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       provider.setCustomParameters({ prompt: 'select_account' });
 
       if (isStandalone) {
-        // signInWithPopup: window.open() in iOS standalone spawns a separate Safari process
-        //   — postMessage can't reach back to the WebView.
-        // signInWithRedirect: navigates the WebView through OAuth, but Apple ITP blocks
-        //   Firebase's cross-origin iframe that reads the result back (different eTLD+1).
-        // PKCE: navigates the WebView to Google directly, exchanges the code client-side
-        //   via a plain HTTPS fetch — no cross-origin iframes, ITP-proof.
-        logToStorage('📲 Standalone: starting PKCE OAuth flow');
-        await startPKCESignIn(); // navigates away — nothing runs after this
+        logToStorage('📲 Standalone: trying Google One Tap (FedCM)');
+        await loadGIS();
+        const idToken = await googleOneTap(GOOGLE_OAUTH_CLIENT_ID);
+        const credential = GoogleAuthProvider.credential(idToken);
+        const result = await signInWithCredential(auth, credential);
+        const user = result.user;
+        logToStorage(`✅ One Tap sign-in: ${user.email}`);
+
+        // Create Firestore profile if needed
+        try {
+          const userRef = doc(db, 'users', user.uid);
+          const userDoc = await getDoc(userRef);
+          if (!userDoc.exists()) {
+            await setDoc(userRef, {
+              uid: user.uid,
+              email: user.email,
+              displayName: user.displayName,
+              photoURL: user.photoURL,
+              createdAt: new Date().toISOString(),
+            });
+          }
+        } catch (firestoreErr) {
+          logToStorage(`⚠️ Non-critical Firestore error: ${firestoreErr}`);
+        }
         return;
       }
 
@@ -210,7 +224,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
         setError('Sign-in cancelled.');
       } else if (err?.code === 'auth/popup-blocked') {
-        setError('Popup was blocked. Try again or use the button in your browser settings.');
+        setError('OPEN_IN_BROWSER');
+      } else if (err?.message?.includes('One Tap') || err?.message?.includes('not shown') || err?.message?.includes('skipped')) {
+        // One Tap unavailable (older iOS, user dismissed, or FedCM not supported)
+        setError('OPEN_IN_BROWSER');
       } else {
         setError(err?.message || 'Failed to sign in with Google.');
       }
@@ -234,35 +251,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       logToStorage(`❌ Logout Error: ${errorMessage}`);
     }
   };
-
-  // Handle PKCE OAuth callback (?code=...&state=...) on page load
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const code = params.get('code');
-    const state = params.get('state');
-    const hasVerifier = !!localStorage.getItem('pkce_verifier');
-
-    if (!code || !state || !hasVerifier) return;
-
-    // Clean the URL immediately so Back/Refresh don't re-trigger
-    history.replaceState({}, '', window.location.pathname);
-
-    logToStorage('🔐 PKCE callback received — exchanging code for token...');
-    setLoading(true);
-    setError(null);
-
-    completePKCESignIn(code, state)
-      .then(() => {
-        logToStorage('✅ PKCE sign-in complete — waiting for onAuthStateChanged');
-        // onAuthStateChanged will update currentUser and setLoading(false)
-      })
-      .catch((err: Error) => {
-        logToStorage(`❌ PKCE error: ${err.message}`);
-        setError(err.message || 'Sign-in failed. Please try again.');
-        setLoading(false);
-      });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Sync debug logs from localStorage periodically
   useEffect(() => {
