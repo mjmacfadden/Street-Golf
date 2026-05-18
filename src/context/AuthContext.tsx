@@ -73,17 +73,10 @@ async function pkceChallenge(verifier: string): Promise<string> {
 
 // Firebase exposes the Google OAuth client ID via its Identity Toolkit endpoint.
 async function fetchGoogleClientId(): Promise<string | null> {
-  try {
-    const res = await fetch(
-      `https://www.googleapis.com/identitytoolkit/v3/relyingparty/getProjectConfig?key=${import.meta.env.VITE_FIREBASE_API_KEY}`
-    );
-    const cfg = await res.json();
-    const google = (cfg.idpConfig as Array<{ provider: string; clientId?: string }> | undefined)
-      ?.find(p => p.provider === 'GOOGLE');
-    return google?.clientId ?? null;
-  } catch {
-    return null;
-  }
+  // Prefer the explicit env var (set VITE_GOOGLE_OAUTH_CLIENT_ID in .env.local)
+  const envClientId = import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID as string | undefined;
+  if (envClientId) return envClientId;
+  return null;
 }
 
 async function startPKCESignIn(): Promise<void> {
