@@ -5,8 +5,6 @@ import {
 } from '../config/firebase';
 import {
   signInWithPopup,
-  signInWithRedirect,
-  getRedirectResult,
   GoogleAuthProvider,
   signOut,
   User,
@@ -52,22 +50,7 @@ const logToStorage = (message: string) => {
   }
 };
 
-// Helper function to detect if app is in standalone/PWA mode
-const isStandaloneMode = (): boolean => {
-  // Check if running as installed PWA (iOS)
-  if (window.navigator.standalone === true) {
-    return true;
-  }
-  // Check if running as installed PWA (Android)
-  if (window.matchMedia('(display-mode: standalone)').matches) {
-    return true;
-  }
-  // Check if running as fullscreen (some PWAs use this)
-  if (window.matchMedia('(display-mode: fullscreen)').matches) {
-    return true;
-  }
-  return false;
-};
+
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
@@ -83,8 +66,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     try {
       setError(null);
       setLoading(true);
-      const inStandaloneMode = isStandaloneMode();
-      logToStorage(`🔐 Starting Google OAuth flow... (PWA standalone: ${inStandaloneMode})`);
+      logToStorage('🔐 Starting Google OAuth flow...');
       localStorage.setItem('authFlow_started', new Date().toISOString());
       
       const provider = new GoogleAuthProvider();
@@ -92,45 +74,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         prompt: 'select_account',
       });
       
-      if (inStandaloneMode) {
-        // Use redirect-based flow for PWA mode (no popups)
-        logToStorage('📱 Using redirect flow for PWA mode');
-        logToStorage('⏳ Redirecting to Google sign-in...');
-        localStorage.setItem('authFlow_step', 'redirecting');
-        await signInWithRedirect(auth, provider);
-        // The redirect will navigate away, so loading will stay true
-        // The auth state will update when user returns
-        logToStorage('⏳ Redirect initiated, awaiting return...');
-      } else {
-        // Use popup flow for browser mode
-        logToStorage('🌐 Using popup flow for browser mode');
-        const result = await signInWithPopup(auth, provider);
-        const user = result.user;
-        logToStorage(`✅ OAuth popup completed, user authenticated: ${user.email}`);
+      // Use popup flow everywhere - works on mobile browser and PWA
+      logToStorage('📱 Using popup flow for authentication');
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
+      logToStorage(`✅ OAuth popup completed, user authenticated: ${user.email}`);
 
-        // Create or update user profile in Firestore (non-blocking)
-        try {
-          const userRef = doc(db, 'users', user.uid);
-          const userDoc = await getDoc(userRef);
+      // Create or update user profile in Firestore (non-blocking)
+      try {
+        const userRef = doc(db, 'users', user.uid);
+        const userDoc = await getDoc(userRef);
 
-          if (!userDoc.exists()) {
-            await setDoc(userRef, {
-              uid: user.uid,
-              email: user.email,
-              displayName: user.displayName,
-              photoURL: user.photoURL,
-              createdAt: new Date().toISOString(),
-            });
-            logToStorage('✅ User profile created in Firestore');
-          } else {
-            logToStorage('✅ User profile already exists');
-          }
-        } catch (firestoreErr) {
-          logToStorage(`⚠️ Non-critical error creating user profile in Firestore: ${firestoreErr}`);
+        if (!userDoc.exists()) {
+          await setDoc(userRef, {
+            uid: user.uid,
+            email: user.email,
+            displayName: user.displayName,
+            photoURL: user.photoURL,
+            createdAt: new Date().toISOString(),
+          });
+          logToStorage('✅ User profile created in Firestore');
+        } else {
+          logToStorage('✅ User profile already exists');
         }
-        
-        logToStorage('⏳ Waiting for auth state update...');
+      } catch (firestoreErr) {
+        logToStorage(`⚠️ Non-critical error creating user profile in Firestore: ${firestoreErr}`);
       }
+      
+      logToStorage('⏳ Waiting for auth state update...');
     } catch (err: any) {
       // Only handle actual auth errors here
       logToStorage(`❌ Google Sign-In Error: ${err?.code} - ${err?.message}`);
@@ -185,113 +156,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     updateLogs();
     const interval = setInterval(updateLogs, 500);
     return () => clearInterval(interval);
-  }, []);
-
-  // Handle OAuth redirect result on app init
-  useEffect(() => {
-    const handleRedirectResult = async () => {
-      try {
-        // Check if redirect script ran and log its status
-        try {
-          const redirectDebug = JSON.parse(localStorage.getItem('redirectScriptDebug') || '{}');
-          const redirectAction = localStorage.getItem('redirectScriptAction');
-          logToStorage(`🔀 Redirect script info: ${JSON.stringify({
-            action: redirectAction,
-            rootPathname: redirectDebug.pathname,
-            rootSearch: redirectDebug.search,
-          })}`);
-        } catch (e) {
-          logToStorage('🔀 No redirect script debug info found');
-        }
-        
-        logToStorage('🔄 Checking for OAuth redirect result...');
-        localStorage.setItem('authFlow_step', 'checking_redirect');
-        
-        // Log current URL and origin for debugging
-        logToStorage(`📍 Current URL: ${window.location.href}`);
-        logToStorage(`📍 Origin: ${window.location.origin}`);
-        logToStorage(`📍 Pathname: ${window.location.pathname}`);
-        logToStorage(`📍 Search params: ${window.location.search || '(none)'}`);
-        
-        // Give Firebase a moment to process the redirect before calling getRedirectResult
-        // This is important after a redirect from Google
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        const result = await getRedirectResult(auth);
-        
-        // Log the full result object to understand what's happening
-        logToStorage(`📦 getRedirectResult returned: ${JSON.stringify({
-          hasUser: !!result?.user,
-          hasCredential: !!result?.credential,
-          operationType: result?.operationType,
-          userEmail: result?.user?.email || 'none',
-        })}`);
-        
-        if (result?.user) {
-          logToStorage(`✅ OAuth redirect completed, user authenticated: ${result.user.email}`);
-          localStorage.setItem('authFlow_step', 'redirect_completed');
-          logToStorage(`📝 User details: ${JSON.stringify({
-            uid: result.user.uid,
-            email: result.user.email,
-            displayName: result.user.displayName,
-          })}`);
-          
-          // Create or update user profile in Firestore
-          try {
-            const userRef = doc(db, 'users', result.user.uid);
-            const userDoc = await getDoc(userRef);
-
-            if (!userDoc.exists()) {
-              await setDoc(userRef, {
-                uid: result.user.uid,
-                email: result.user.email,
-                displayName: result.user.displayName,
-                photoURL: result.user.photoURL,
-                createdAt: new Date().toISOString(),
-              });
-              logToStorage('✅ User profile created in Firestore (from redirect)');
-            } else {
-              logToStorage('✅ User profile already exists in Firestore');
-            }
-          } catch (firestoreErr) {
-            logToStorage(`⚠️ Non-critical error creating user profile in Firestore: ${firestoreErr}`);
-          }
-          
-          // Auth state will update automatically via onAuthStateChanged
-          logToStorage('⏳ Redirect result processed, waiting for auth state listener...');
-        } else {
-          logToStorage(`⚠️ getRedirectResult returned null/empty.`);
-          logToStorage(`💡 If you see search params above but still get null: Update authorized redirect URIs in both Firebase AND Google Cloud Console to use your app URL (https://mjmacfadden.github.io/street-golf/) instead of /__/auth/handler`);
-          
-          // Check localStorage to see if anything is stored
-          try {
-            const keys = Object.keys(localStorage);
-            const firebaseKeys = keys.filter(k => k.includes('firebase') || k.includes('auth'));
-            if (firebaseKeys.length > 0) {
-              logToStorage(`💾 Found ${firebaseKeys.length} Firebase storage keys`);
-            } else {
-              logToStorage(`⚠️ No Firebase storage keys found - session may not be persisting`);
-            }
-          } catch (e) {
-            logToStorage(`⚠️ Could not check localStorage: ${e}`);
-          }
-        }
-      } catch (err: any) {
-        // Check if this is an auth/redirect-operation-pending-for-user error
-        // This is normal when the redirect hasn't completed yet
-        if (err?.code === 'auth/redirect-cancelled-by-user') {
-          logToStorage('ℹ️ User cancelled OAuth redirect');
-          setError('Sign-in cancelled');
-          setLoading(false);
-        } else if (err?.code?.includes('redirect-operation-pending')) {
-          logToStorage('ℹ️ Redirect operation pending...');
-        } else {
-          logToStorage(`⚠️ Error checking redirect result: ${err?.code} - ${err?.message}`);
-        }
-      }
-    };
-
-    handleRedirectResult();
   }, []);
 
   // Listen to auth state changes - this is the source of truth for login state
