@@ -5,6 +5,8 @@ import {
 } from '../config/firebase';
 import {
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider,
   signOut,
   User,
@@ -50,6 +52,23 @@ const logToStorage = (message: string) => {
   }
 };
 
+// Helper function to detect if app is in standalone/PWA mode
+const isStandaloneMode = (): boolean => {
+  // Check if running as installed PWA (iOS)
+  if (window.navigator.standalone === true) {
+    return true;
+  }
+  // Check if running as installed PWA (Android)
+  if (window.matchMedia('(display-mode: standalone)').matches) {
+    return true;
+  }
+  // Check if running as fullscreen (some PWAs use this)
+  if (window.matchMedia('(display-mode: fullscreen)').matches) {
+    return true;
+  }
+  return false;
+};
+
 
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
@@ -66,7 +85,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     try {
       setError(null);
       setLoading(true);
-      logToStorage('🔐 Starting Google OAuth flow...');
+      const inStandaloneMode = isStandaloneMode();
+      logToStorage(`🔐 Starting Google OAuth flow... (PWA standalone: ${inStandaloneMode})`);
       localStorage.setItem('authFlow_started', new Date().toISOString());
       
       const provider = new GoogleAuthProvider();
@@ -74,36 +94,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         prompt: 'select_account',
       });
       
-      // Use popup flow everywhere - works on mobile browser and PWA
-      logToStorage('📱 Using popup flow for authentication');
-      const result = await signInWithPopup(auth, provider);
-      const user = result.user;
-      logToStorage(`✅ OAuth popup completed, user authenticated: ${user.email}`);
+      if (inStandaloneMode) {
+        // Use redirect-based flow for PWA mode (popups blocked in standalone)
+        // With authDomain now set to actual domain, this should work properly
+        logToStorage('📱 Using redirect flow for PWA mode (authDomain is now first-party)');
+        logToStorage('⏳ Redirecting to Google sign-in...');
+        localStorage.setItem('authFlow_step', 'redirecting');
+        await signInWithRedirect(auth, provider);
+        // The redirect will navigate away, so loading will stay true
+        // The auth state will update when user returns
+        logToStorage('⏳ Redirect initiated, awaiting return...');
+      } else {
+        // Use popup flow for browser mode (works fine in browser)
+        logToStorage('🌐 Using popup flow for browser mode');
+        const result = await signInWithPopup(auth, provider);
+        const user = result.user;
+        logToStorage(`✅ OAuth popup completed, user authenticated: ${user.email}`);
 
-      // Create or update user profile in Firestore (non-blocking)
-      try {
-        const userRef = doc(db, 'users', user.uid);
-        const userDoc = await getDoc(userRef);
+        // Create or update user profile in Firestore (non-blocking)
+        try {
+          const userRef = doc(db, 'users', user.uid);
+          const userDoc = await getDoc(userRef);
 
-        if (!userDoc.exists()) {
-          await setDoc(userRef, {
-            uid: user.uid,
-            email: user.email,
-            displayName: user.displayName,
-            photoURL: user.photoURL,
-            createdAt: new Date().toISOString(),
-          });
-          logToStorage('✅ User profile created in Firestore');
-        } else {
-          logToStorage('✅ User profile already exists');
+          if (!userDoc.exists()) {
+            await setDoc(userRef, {
+              uid: user.uid,
+              email: user.email,
+              displayName: user.displayName,
+              photoURL: user.photoURL,
+              createdAt: new Date().toISOString(),
+            });
+            logToStorage('✅ User profile created in Firestore');
+          } else {
+            logToStorage('✅ User profile already exists');
+          }
+        } catch (firestoreErr) {
+          logToStorage(`⚠️ Non-critical error creating user profile in Firestore: ${firestoreErr}`);
         }
-      } catch (firestoreErr) {
-        logToStorage(`⚠️ Non-critical error creating user profile in Firestore: ${firestoreErr}`);
+        
+        logToStorage('⏳ Waiting for auth state update...');
       }
-      
-      logToStorage('⏳ Waiting for auth state update...');
     } catch (err: any) {
-      // Only handle actual auth errors here
+      // Handle auth errors (both popup and redirect)
       logToStorage(`❌ Google Sign-In Error: ${err?.code} - ${err?.message}`);
       
       if (err?.code === 'auth/popup-closed-by-user') {
@@ -115,6 +147,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       } else if (err?.code === 'auth/cancelled-popup-request') {
         setError('Sign-in cancelled');
         logToStorage('Popup request was cancelled');
+      } else if (err?.code === 'auth/redirect-cancelled-by-user') {
+        setError('Sign-in cancelled');
+        logToStorage('User cancelled the OAuth redirect');
       } else {
         const message = err?.message || 'Failed to sign in with Google';
         setError(message);
@@ -156,6 +191,51 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     updateLogs();
     const interval = setInterval(updateLogs, 500);
     return () => clearInterval(interval);
+  }, []);
+
+  // Handle OAuth redirect result on app init (for PWA redirect flow)
+  useEffect(() => {
+    const handleRedirectResult = async () => {
+      try {
+        logToStorage('🔄 Checking for OAuth redirect result...');
+        const result = await getRedirectResult(auth);
+        
+        if (result?.user) {
+          logToStorage(`✅ OAuth redirect completed, user authenticated: ${result.user.email}`);
+          
+          // Create or update user profile in Firestore
+          try {
+            const userRef = doc(db, 'users', result.user.uid);
+            const userDoc = await getDoc(userRef);
+
+            if (!userDoc.exists()) {
+              await setDoc(userRef, {
+                uid: result.user.uid,
+                email: result.user.email,
+                displayName: result.user.displayName,
+                photoURL: result.user.photoURL,
+                createdAt: new Date().toISOString(),
+              });
+              logToStorage('✅ User profile created in Firestore (from redirect)');
+            } else {
+              logToStorage('✅ User profile already exists in Firestore');
+            }
+          } catch (firestoreErr) {
+            logToStorage(`⚠️ Non-critical error creating user profile in Firestore: ${firestoreErr}`);
+          }
+        } else {
+          logToStorage('ℹ️ No redirect result found (this is normal for popup flow or first load)');
+        }
+      } catch (err: any) {
+        if (err?.code === 'auth/redirect-cancelled-by-user') {
+          logToStorage('ℹ️ User cancelled OAuth redirect');
+        } else if (!err?.code?.includes('redirect-operation-pending')) {
+          logToStorage(`⚠️ Error checking redirect result: ${err?.code} - ${err?.message}`);
+        }
+      }
+    };
+
+    handleRedirectResult();
   }, []);
 
   // Listen to auth state changes - this is the source of truth for login state
