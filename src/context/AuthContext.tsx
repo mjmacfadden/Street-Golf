@@ -211,6 +211,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         logToStorage(`📍 Current URL: ${window.location.href}`);
         logToStorage(`📍 Origin: ${window.location.origin}`);
         logToStorage(`📍 Pathname: ${window.location.pathname}`);
+        logToStorage(`📍 Search params: ${window.location.search || '(none)'}`);
+        
+        // Give Firebase a moment to process the redirect before calling getRedirectResult
+        // This is important after a redirect from Google
+        await new Promise(resolve => setTimeout(resolve, 100));
         
         const result = await getRedirectResult(auth);
         
@@ -255,8 +260,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           // Auth state will update automatically via onAuthStateChanged
           logToStorage('⏳ Redirect result processed, waiting for auth state listener...');
         } else {
-          logToStorage(`⚠️ getRedirectResult returned null/empty. This means the redirect either didn't happen or wasn't captured.`);
-          logToStorage(`💡 This could be: 1) Redirect URI mismatch in Firebase Console, 2) User cancelled, 3) Query params not preserved, or 4) Session not preserved`);
+          logToStorage(`⚠️ getRedirectResult returned null/empty.`);
+          logToStorage(`💡 If you see search params above but still get null: Update authorized redirect URIs in both Firebase AND Google Cloud Console to use your app URL (https://mjmacfadden.github.io/street-golf/) instead of /__/auth/handler`);
           
           // Check localStorage to see if anything is stored
           try {

@@ -130,7 +130,7 @@ export const Profile: React.FC<ProfileProps> = ({ onEditCourse, onLogout, onDele
               <img
                 src={currentUser.photoURL}
                 alt="Profile"
-                className="w-16 h-16 rounded-full border-2 border-lime"
+                className="w-16 h-16 rounded-full border-2 border-lime object-cover"
               />
             )}
           </div>

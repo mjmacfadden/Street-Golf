@@ -10,7 +10,7 @@
   "theme_color": "#BFFF00",
   "icons": [
     {
-      "src": "/street-golf/images/street-golf.png",
+      "src": "./images/street-golf.png",
       "sizes": "1200x1080",
       "type": "image/png",
       "purpose": "any"
