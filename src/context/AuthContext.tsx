@@ -71,12 +71,14 @@ async function pkceChallenge(verifier: string): Promise<string> {
   return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
 }
 
-// Firebase exposes the Google OAuth client ID via its Identity Toolkit endpoint.
+// The Google OAuth client ID is a public identifier — safe to hardcode.
+// (It ends up in the compiled JS bundle regardless, so gitignoring it provides no security benefit.)
+const GOOGLE_OAUTH_CLIENT_ID =
+  (import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID as string | undefined) ||
+  '11862667875-ai1fo9pnp7ifovic9b9pp2gig99b1ogj.apps.googleusercontent.com';
+
 async function fetchGoogleClientId(): Promise<string | null> {
-  // Prefer the explicit env var (set VITE_GOOGLE_OAUTH_CLIENT_ID in .env.local)
-  const envClientId = import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID as string | undefined;
-  if (envClientId) return envClientId;
-  return null;
+  return GOOGLE_OAUTH_CLIENT_ID || null;
 }
 
 async function startPKCESignIn(): Promise<void> {
