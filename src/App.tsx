@@ -30,7 +30,10 @@ export default function App() {
 function AppContent() {
   const { currentUser, loading } = useAuth();
   const [activeTab, setActiveTab] = useState<'home' | 'map' | 'scorecard' | 'history' | 'builder' | 'profile'>('home');
-  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(() => {
+    // Auto-open auth modal if redirected from PWA's "Open in Browser" fallback
+    return new URLSearchParams(window.location.search).get('openAuth') === '1';
+  });
   
   // Courses
   const [availableCourses, setAvailableCourses] = useState<Course[]>(COURSES);
