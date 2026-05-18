@@ -35,12 +35,16 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // Helper function to log to both console and localStorage
+// Only logs errors and critical steps, not verbose details
 const logToStorage = (message: string) => {
   const timestamp = new Date().toLocaleTimeString();
   const fullMessage = `[${timestamp}] ${message}`;
   console.log(fullMessage);
   
-  // Also store in localStorage for mobile debugging
+  // Only store errors and critical messages in localStorage for mobile debugging
+  const isImportant = message.includes('❌') || message.includes('✅') || message.includes('🔐') || message.includes('Error');
+  if (!isImportant) return; // Skip verbose logs
+  
   try {
     let logs = JSON.parse(localStorage.getItem('authDebugLogs') || '[]') as string[];
     logs.push(fullMessage);
