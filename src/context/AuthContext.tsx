@@ -5,7 +5,7 @@ import {
 } from '../config/firebase';
 import {
   signInWithPopup,
-  signInWithRedirect,
+  signInWithCredential,
   GoogleAuthProvider,
   signOut,
   User,
@@ -55,7 +55,103 @@ const logToStorage = (message: string) => {
   }
 };
 
+// ---------------------------------------------------------------------------
+// PKCE OAuth helpers — bypass Firebase's cross-origin iframe mechanism
+// (which Apple ITP blocks in PWA standalone mode on GitHub Pages hosting)
+// ---------------------------------------------------------------------------
 
+function pkceVerifier(): string {
+  const buf = new Uint8Array(32);
+  crypto.getRandomValues(buf);
+  return btoa(String.fromCharCode(...buf)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+async function pkceChallenge(verifier: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+// Firebase exposes the Google OAuth client ID via its Identity Toolkit endpoint.
+async function fetchGoogleClientId(): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `https://www.googleapis.com/identitytoolkit/v3/relyingparty/getProjectConfig?key=${import.meta.env.VITE_FIREBASE_API_KEY}`
+    );
+    const cfg = await res.json();
+    const google = (cfg.idpConfig as Array<{ provider: string; clientId?: string }> | undefined)
+      ?.find(p => p.provider === 'GOOGLE');
+    return google?.clientId ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function startPKCESignIn(): Promise<void> {
+  const clientId = await fetchGoogleClientId();
+  if (!clientId) throw new Error('Could not fetch Google OAuth client ID from Firebase config');
+
+  const verifier = pkceVerifier();
+  const challenge = await pkceChallenge(verifier);
+  const state = pkceVerifier(); // random CSRF nonce
+
+  // Use localStorage — sessionStorage can be cleared by WebKit on full-page navigations
+  localStorage.setItem('pkce_verifier', verifier);
+  localStorage.setItem('pkce_state', state);
+
+  // Redirect URI must be registered in Google Cloud Console:
+  // APIs & Services → Credentials → Web client (auto created by Google Service)
+  // → Authorized redirect URIs → add https://mjmacfadden.github.io/street-golf/
+  const redirectUri = `${window.location.origin}${window.location.pathname}`.replace(/\/$/, '') + '/';
+
+  const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+  url.searchParams.set('client_id', clientId);
+  url.searchParams.set('redirect_uri', redirectUri);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('scope', 'openid profile email');
+  url.searchParams.set('code_challenge', challenge);
+  url.searchParams.set('code_challenge_method', 'S256');
+  url.searchParams.set('state', state);
+  url.searchParams.set('prompt', 'select_account');
+
+  window.location.href = url.toString();
+}
+
+async function completePKCESignIn(code: string, state: string): Promise<void> {
+  const savedState = localStorage.getItem('pkce_state');
+  const verifier = localStorage.getItem('pkce_verifier');
+
+  localStorage.removeItem('pkce_state');
+  localStorage.removeItem('pkce_verifier');
+
+  if (state !== savedState) throw new Error('OAuth state mismatch — possible CSRF');
+  if (!verifier) throw new Error('PKCE verifier missing');
+
+  const clientId = await fetchGoogleClientId();
+  if (!clientId) throw new Error('Could not fetch Google OAuth client ID');
+
+  const redirectUri = `${window.location.origin}${window.location.pathname}`.replace(/\/$/, '') + '/';
+
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code',
+      code,
+      code_verifier: verifier,
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({})) as { error_description?: string; error?: string };
+    throw new Error(err.error_description || err.error || `Token exchange failed (${res.status})`);
+  }
+
+  const tokens = await res.json() as { id_token: string; access_token: string };
+  const credential = GoogleAuthProvider.credential(tokens.id_token, tokens.access_token);
+  await signInWithCredential(auth, credential);
+}
 
 
 
@@ -80,14 +176,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       provider.setCustomParameters({ prompt: 'select_account' });
 
       if (isStandalone) {
-        // In iOS standalone mode, window.open() spawns a Safari process — a completely
-        // different context that can't postMessage back to the standalone WebView.
-        // signInWithRedirect navigates the WebView itself through OAuth, so auth state
-        // lands back in the same context. onAuthStateChanged handles the result.
-        logToStorage('📲 Standalone mode: using signInWithRedirect');
-        sessionStorage.setItem('pendingRedirectSignIn', 'true');
-        await signInWithRedirect(auth, provider);
-        return; // page navigates away from here
+        // signInWithPopup: window.open() in iOS standalone spawns a separate Safari process
+        //   — postMessage can't reach back to the WebView.
+        // signInWithRedirect: navigates the WebView through OAuth, but Apple ITP blocks
+        //   Firebase's cross-origin iframe that reads the result back (different eTLD+1).
+        // PKCE: navigates the WebView to Google directly, exchanges the code client-side
+        //   via a plain HTTPS fetch — no cross-origin iframes, ITP-proof.
+        logToStorage('📲 Standalone: starting PKCE OAuth flow');
+        await startPKCESignIn(); // navigates away — nothing runs after this
+        return;
       }
 
       // Browser: popup communicates via postMessage — works fine
@@ -118,7 +215,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
         setError('Sign-in cancelled.');
       } else if (err?.code === 'auth/popup-blocked') {
-        setError('OPEN_IN_BROWSER');
+        setError('Popup was blocked. Try again or use the button in your browser settings.');
       } else {
         setError(err?.message || 'Failed to sign in with Google.');
       }
@@ -142,6 +239,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       logToStorage(`❌ Logout Error: ${errorMessage}`);
     }
   };
+
+  // Handle PKCE OAuth callback (?code=...&state=...) on page load
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    const state = params.get('state');
+    const hasVerifier = !!localStorage.getItem('pkce_verifier');
+
+    if (!code || !state || !hasVerifier) return;
+
+    // Clean the URL immediately so Back/Refresh don't re-trigger
+    history.replaceState({}, '', window.location.pathname);
+
+    logToStorage('🔐 PKCE callback received — exchanging code for token...');
+    setLoading(true);
+    setError(null);
+
+    completePKCESignIn(code, state)
+      .then(() => {
+        logToStorage('✅ PKCE sign-in complete — waiting for onAuthStateChanged');
+        // onAuthStateChanged will update currentUser and setLoading(false)
+      })
+      .catch((err: Error) => {
+        logToStorage(`❌ PKCE error: ${err.message}`);
+        setError(err.message || 'Sign-in failed. Please try again.');
+        setLoading(false);
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Sync debug logs from localStorage periodically
   useEffect(() => {
@@ -168,18 +294,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (unsubscribed) return;
-
-      // Detect returning from a signInWithRedirect flow
-      const pendingRedirect = sessionStorage.getItem('pendingRedirectSignIn');
-      if (pendingRedirect) {
-        sessionStorage.removeItem('pendingRedirectSignIn');
-        if (!user) {
-          logToStorage('⚠️ Returned from redirect but no user — OAuth was cancelled or failed');
-          setError('Sign-in was cancelled or failed. Please try again.');
-        } else {
-          logToStorage(`✅ Redirect sign-in complete: ${user.email}`);
-        }
-      }
 
       // Clear any pending timeout since we got a response
       if (timeoutId) {
