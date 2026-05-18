@@ -83,7 +83,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
               Sign-in couldn't open a popup. Tap below to sign in via your browser, then come back to this app.
             </p>
             <a
-              href="https://mjmacfadden.github.io/street-golf/?openAuth=1"
+              href="https://street-golf-69679.web.app/?openAuth=1"
               target="_blank"
               rel="noopener noreferrer"
               className="block w-full py-2 px-4 bg-yellow-500/20 hover:bg-yellow-500/30 border border-yellow-500/40 text-yellow-300 text-sm font-bold rounded-lg text-center transition-colors"

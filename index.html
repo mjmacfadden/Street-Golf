@@ -20,62 +20,9 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Street Golf" />
-    <link rel="icon" type="image/png" href="/street-golf/images/street-golf.png" />
-    <link rel="manifest" href="/street-golf/manifest.json">
+    <link rel="icon" type="image/png" href="/images/street-golf.png" />
+    <link rel="manifest" href="/manifest.json">
     <title>Street Golf - Urban 9-Hole Tracker</title>
-    <script>
-      // Handle Firebase OAuth redirect at root domain
-      // Firebase redirects to root (https://mjmacfadden.github.io) but app is at /street-golf/
-      // This script detects the redirect and forwards it to /street-golf/ with query params preserved
-      
-      // Debug the redirect script behavior - ENHANCED LOGGING
-      const redirectDebug = {
-        pathname: window.location.pathname,
-        search: window.location.search,
-        hash: window.location.hash,
-        href: window.location.href,
-        hostname: window.location.hostname,
-        timestamp: new Date().toLocaleTimeString(),
-        isStandalone: window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches
-      };
-      localStorage.setItem('redirectScriptDebug', JSON.stringify(redirectDebug));
-      console.log('🔀 ROOT REDIRECT SCRIPT:', redirectDebug);
-      
-      // Log all query params and hash
-      if (window.location.search) {
-        console.log('✅ ROOT HAS QUERY PARAMS:', window.location.search);
-        localStorage.setItem('redirectScript_foundParams', 'true');
-      } else {
-        console.log('❌ ROOT HAS NO QUERY PARAMS');
-        localStorage.setItem('redirectScript_foundParams', 'false');
-      }
-      
-      // Case 1: At root with OAuth query params - redirect to /street-golf/ with params
-      if (window.location.pathname === '/' && window.location.search) {
-        localStorage.setItem('redirectScriptAction', 'redirecting_root_with_query');
-        const targetUrl = '/street-golf/' + window.location.search;
-        console.log('🔀 REDIRECTING ROOT → /street-golf/ WITH PARAMS:', targetUrl);
-        window.location.href = targetUrl;
-      } 
-      // Case 2: At root without query params - redirect to /street-golf/
-      else if (window.location.pathname === '/' && !window.location.search) {
-        if (window.location.hostname !== 'localhost') {
-          localStorage.setItem('redirectScriptAction', 'redirecting_root_to_subdir');
-          console.log('🔀 REDIRECTING ROOT → /street-golf/ (no params)');
-          window.location.href = '/street-golf/';
-        }
-      } 
-      // Case 3: Already at /street-golf/ with OAuth params - good, no redirect needed
-      else if (window.location.pathname === '/street-golf/' && window.location.search) {
-        localStorage.setItem('redirectScriptAction', 'already_at_subdir_with_oauth_params');
-        console.log('✅ ALREADY AT /street-golf/ WITH OAUTH PARAMS:', window.location.search);
-      }
-      // Case 4: Already at /street-golf/ without params - check if we need to go to root for OAuth
-      else if (window.location.pathname === '/street-golf/' && !window.location.search) {
-        localStorage.setItem('redirectScriptAction', 'at_subdir_no_params');
-        console.log('ℹ️ AT /street-golf/ WITHOUT PARAMS');
-      }
-    </script>
   </head>
   <body>
     <div id="root"></div>

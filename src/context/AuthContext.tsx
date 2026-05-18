@@ -5,7 +5,8 @@ import {
 } from '../config/firebase';
 import {
   signInWithPopup,
-  signInWithCredential,
+  signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider,
   signOut,
   User,
@@ -56,95 +57,14 @@ const logToStorage = (message: string) => {
 };
 
 // ---------------------------------------------------------------------------
-// Google One Tap / FedCM — standalone PWA sign-in
+// Auth helpers
 //
-// signInWithPopup → window.open() opens Safari (different OS process); postMessage
-//                   can't reach back to the standalone WebView.
-// signInWithRedirect → Apple ITP blocks the cross-origin iframe Firebase uses to
-//                      read the result back (app on github.io ≠ auth on firebaseapp.com).
-// PKCE → Google requires client_secret for Web Application clients even with PKCE
-//         (it's a server-side-only mechanism; we can't expose the secret client-side).
-// One Tap / FedCM → browser-native credential selector, no popup/redirect/iframe.
-//                   Supported on iOS 17+ WebKit (WKWebView). Returns id_token directly.
+// signInWithPopup  → browser mode only; popup opens as child window, postMessage works fine.
+// signInWithRedirect → standalone PWA mode. Firebase redirects within the same WKWebView
+//                      context; the auth handler lives on street-golf-69679.web.app (same
+//                      eTLD+1 as the app), so ITP never blocks the cross-origin iframe.
+//                      getRedirectResult() is called on every page load to pick up the result.
 // ---------------------------------------------------------------------------
-
-// Google OAuth client ID — public identifier, safe to hardcode in client code.
-const GOOGLE_OAUTH_CLIENT_ID =
-  (import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID as string | undefined) ||
-  '11862667875-ai1fo9pnp7ifovic9b9pp2gig99b1ogj.apps.googleusercontent.com';
-
-type GISCredentialResponse = { credential: string; select_by: string };
-type GISPromptNotification = {
-  isDisplayMoment(): boolean;
-  isDisplayed(): boolean;
-  isNotDisplayed(): boolean;
-  getNotDisplayedReason(): string;
-  isSkippedMoment(): boolean;
-  getSkippedReason(): string;
-  isDismissedMoment(): boolean;
-  getDismissedReason(): string;
-};
-declare global {
-  interface Window {
-    google?: {
-      accounts: {
-        id: {
-          initialize(cfg: {
-            client_id: string;
-            callback(r: GISCredentialResponse): void;
-            use_fedcm_for_prompt?: boolean;
-            itp_support?: boolean;
-            cancel_on_tap_outside?: boolean;
-          }): void;
-          prompt(cb?: (n: GISPromptNotification) => void): void;
-          cancel(): void;
-        };
-      };
-    };
-  }
-}
-
-function loadGIS(): Promise<void> {
-  if (window.google?.accounts?.id) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = 'https://accounts.google.com/gsi/client';
-    s.async = true;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error('Failed to load Google Identity Services'));
-    document.head.appendChild(s);
-  });
-}
-
-function googleOneTap(clientId: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let done = false;
-    const finish = (fn: typeof resolve | typeof reject, v: Parameters<typeof resolve>[0] | Parameters<typeof reject>[0]) => {
-      if (done) return;
-      done = true;
-      (fn as (v: unknown) => void)(v);
-    };
-
-    window.google!.accounts.id.initialize({
-      client_id: clientId,
-      callback: (r: GISCredentialResponse) => finish(resolve, r.credential),
-      use_fedcm_for_prompt: true,
-      itp_support: true,
-      cancel_on_tap_outside: false,
-    });
-
-    window.google!.accounts.id.prompt((n: GISPromptNotification) => {
-      if (n.isNotDisplayed()) {
-        finish(reject, new Error(`One Tap not shown: ${n.getNotDisplayedReason()}`));
-      } else if (n.isSkippedMoment()) {
-        finish(reject, new Error(`One Tap skipped: ${n.getSkippedReason()}`));
-      }
-    });
-
-    // Safety timeout
-    setTimeout(() => finish(reject, new Error('One Tap timed out after 30s')), 30000);
-  });
-}
 
 
 
@@ -169,30 +89,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       provider.setCustomParameters({ prompt: 'select_account' });
 
       if (isStandalone) {
-        logToStorage('📲 Standalone: trying Google One Tap (FedCM)');
-        await loadGIS();
-        const idToken = await googleOneTap(GOOGLE_OAUTH_CLIENT_ID);
-        const credential = GoogleAuthProvider.credential(idToken);
-        const result = await signInWithCredential(auth, credential);
-        const user = result.user;
-        logToStorage(`✅ One Tap sign-in: ${user.email}`);
-
-        // Create Firestore profile if needed
-        try {
-          const userRef = doc(db, 'users', user.uid);
-          const userDoc = await getDoc(userRef);
-          if (!userDoc.exists()) {
-            await setDoc(userRef, {
-              uid: user.uid,
-              email: user.email,
-              displayName: user.displayName,
-              photoURL: user.photoURL,
-              createdAt: new Date().toISOString(),
-            });
-          }
-        } catch (firestoreErr) {
-          logToStorage(`⚠️ Non-critical Firestore error: ${firestoreErr}`);
-        }
+        // Redirect navigates the WKWebView to Firebase's auth handler on the same
+        // web.app domain, then back — no popup, no cross-origin iframe, no ITP issue.
+        logToStorage('📲 Standalone: redirecting to Google sign-in...');
+        await signInWithRedirect(auth, provider);
+        // Page navigates away — nothing below this line runs.
         return;
       }
 
@@ -225,9 +126,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         setError('Sign-in cancelled.');
       } else if (err?.code === 'auth/popup-blocked') {
         setError('OPEN_IN_BROWSER');
-      } else if (err?.message?.includes('One Tap') || err?.message?.includes('not shown') || err?.message?.includes('skipped')) {
-        // One Tap unavailable (older iOS, user dismissed, or FedCM not supported)
-        setError('OPEN_IN_BROWSER');
+
       } else {
         setError(err?.message || 'Failed to sign in with Google.');
       }
@@ -251,6 +150,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       logToStorage(`❌ Logout Error: ${errorMessage}`);
     }
   };
+
+  // On mount: pick up the result of a signInWithRedirect if one is pending.
+  // This fires on every page load but resolves immediately (null) when there's no redirect.
+  useEffect(() => {
+    getRedirectResult(auth)
+      .then((result) => {
+        if (!result) return; // Normal page load — no pending redirect
+        logToStorage(`✅ Redirect sign-in complete: ${result.user.email}`);
+        // onAuthStateChanged fires automatically; create Firestore profile if needed.
+        const user = result.user;
+        const userRef = doc(db, 'users', user.uid);
+        getDoc(userRef)
+          .then((snap) => {
+            if (!snap.exists()) {
+              return setDoc(userRef, {
+                uid: user.uid,
+                email: user.email,
+                displayName: user.displayName,
+                photoURL: user.photoURL,
+                createdAt: new Date().toISOString(),
+              });
+            }
+          })
+          .catch((err) => logToStorage(`⚠️ Non-critical Firestore error: ${err}`));
+      })
+      .catch((err) => {
+        logToStorage(`❌ Redirect sign-in error: ${err?.message}`);
+        setError(err?.message || 'Sign-in failed. Please try again.');
+        setLoading(false);
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Sync debug logs from localStorage periodically
   useEffect(() => {
