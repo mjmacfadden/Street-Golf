@@ -5,6 +5,7 @@ import {
 } from '../config/firebase';
 import {
   signInWithPopup,
+  signInWithRedirect,
   GoogleAuthProvider,
   signOut,
   User,
@@ -78,10 +79,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
 
-      // Use popup flow for both browser and PWA.
-      // Firebase popup uses postMessage (not cross-origin iframe storage),
-      // so ITP does not block it. Requires authDomain = street-golf-69679.firebaseapp.com
-      // so Firebase can serve its /__/auth/handler script.
+      if (isStandalone) {
+        // In iOS standalone mode, window.open() spawns a Safari process — a completely
+        // different context that can't postMessage back to the standalone WebView.
+        // signInWithRedirect navigates the WebView itself through OAuth, so auth state
+        // lands back in the same context. onAuthStateChanged handles the result.
+        logToStorage('📲 Standalone mode: using signInWithRedirect');
+        sessionStorage.setItem('pendingRedirectSignIn', 'true');
+        await signInWithRedirect(auth, provider);
+        return; // page navigates away from here
+      }
+
+      // Browser: popup communicates via postMessage — works fine
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
       logToStorage(`✅ Signed in: ${user.email}`);
@@ -108,8 +117,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
       if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
         setError('Sign-in cancelled.');
-      } else if (err?.code === 'auth/popup-blocked' || err?.code === 'auth/network-request-failed') {
-        // Popup blocked or can't communicate in standalone mode — offer browser fallback
+      } else if (err?.code === 'auth/popup-blocked') {
         setError('OPEN_IN_BROWSER');
       } else {
         setError(err?.message || 'Failed to sign in with Google.');
@@ -160,7 +168,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (unsubscribed) return;
-      
+
+      // Detect returning from a signInWithRedirect flow
+      const pendingRedirect = sessionStorage.getItem('pendingRedirectSignIn');
+      if (pendingRedirect) {
+        sessionStorage.removeItem('pendingRedirectSignIn');
+        if (!user) {
+          logToStorage('⚠️ Returned from redirect but no user — OAuth was cancelled or failed');
+          setError('Sign-in was cancelled or failed. Please try again.');
+        } else {
+          logToStorage(`✅ Redirect sign-in complete: ${user.email}`);
+        }
+      }
+
       // Clear any pending timeout since we got a response
       if (timeoutId) {
         clearTimeout(timeoutId);
