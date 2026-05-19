@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Street Golf - Sign In</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+        'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+        sans-serif;
+      background: #010409;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+    }
+    .container {
+      text-align: center;
+      padding: 20px;
+    }
+    h1 {
+      margin-bottom: 20px;
+      color: #BFFF00;
+      font-size: 24px;
+    }
+    p {
+      margin-bottom: 15px;
+      color: #ccc;
+    }
+    button {
+      background-color: #BFFF00;
+      color: #010409;
+      border: none;
+      padding: 12px 24px;
+      font-size: 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button:hover {
+      opacity: 0.9;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .error {
+      color: #ff6b6b;
+      margin-top: 15px;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Street Golf</h1>
+    <p id="status">Loading...</p>
+    <button id="signInBtn" onclick="handleSignIn()" style="display: none;">Sign In with Google</button>
+    <div id="error" class="error"></div>
+  </div>
+
+  <script type="module">
+    // Firebase config — must match the main app
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js';
+    import { getAuth, signInWithPopup, GoogleAuthProvider } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js';
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyDxlOuLyPw8yWx6SqWVUiKYz-_0lOdOGzU",
+      authDomain: "street-golf-69679.firebaseapp.com",
+      projectId: "street-golf-69679",
+      storageBucket: "street-golf-69679.appspot.com",
+      messagingSenderId: "970338305869",
+      appId: "1:970338305869:web:ec2d71f0edbf98a4b47c16",
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+
+    window.handleSignIn = async () => {
+      try {
+        const statusEl = document.getElementById('status');
+        const errorEl = document.getElementById('error');
+        const btnEl = document.getElementById('signInBtn');
+
+        statusEl.textContent = 'Signing in...';
+        errorEl.textContent = '';
+        btnEl.disabled = true;
+
+        const provider = new GoogleAuthProvider();
+        provider.setCustomParameters({ prompt: 'select_account' });
+
+        const result = await signInWithPopup(auth, provider);
+        const idToken = result.user.getIdTokenSync ? result.user.getIdTokenSync() : null;
+
+        // If we don't have the idToken directly, get it
+        let token = idToken;
+        if (!token) {
+          token = await result.user.getIdToken(true);
+        }
+
+        // Extract credential from result
+        const credential = GoogleAuthProvider.credentialFromResult(result);
+        token = credential?.idToken || token;
+
+        statusEl.textContent = 'Completing sign-in...';
+
+        // Send the token back to the opener (main PWA)
+        if (window.opener) {
+          window.opener.postMessage(
+            { type: 'AUTH_SUCCESS', idToken: token },
+            'https://mjmacfadden.github.io'
+          );
+          // Close after a short delay to ensure message is received
+          setTimeout(() => window.close(), 500);
+        } else {
+          throw new Error('No parent window found. Make sure this was opened from the main app.');
+        }
+      } catch (error) {
+        const errorEl = document.getElementById('error');
+        const statusEl = document.getElementById('status');
+        const btnEl = document.getElementById('signInBtn');
+
+        console.error('Auth error:', error);
+        errorEl.textContent = error instanceof Error ? error.message : 'Sign-in failed. Please try again.';
+        statusEl.textContent = 'Error occurred';
+        btnEl.disabled = false;
+
+        // Send error back to opener
+        if (window.opener) {
+          window.opener.postMessage(
+            { type: 'AUTH_ERROR', error: errorEl.textContent },
+            'https://mjmacfadden.github.io'
+          );
+        }
+      }
+    };
+
+    // Auto-start sign-in when page loads
+    window.addEventListener('DOMContentLoaded', () => {
+      const statusEl = document.getElementById('status');
+      const btnEl = document.getElementById('signInBtn');
+      statusEl.textContent = 'Ready to sign in';
+      btnEl.style.display = 'inline-block';
+      // Auto-trigger for seamless UX
+      handleSignIn();
+    });
+  </script>
+</body>
+</html>

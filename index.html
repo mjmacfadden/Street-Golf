@@ -20,9 +20,20 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Street Golf" />
-    <link rel="icon" type="image/png" href="/images/street-golf.png" />
-    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" type="image/png" href="/street-golf/images/street-golf.png" />
+    <link rel="manifest" href="/street-golf/manifest.json">
     <title>Street Golf - Urban 9-Hole Tracker</title>
+    <script>
+      // Handle Firebase OAuth redirect at root domain
+      // Firebase may redirect to root (https://mjmacfadden.github.io) but app is at /street-golf/
+      // This script detects the redirect and forwards it to /street-golf/ with query params preserved
+      if (window.location.pathname === '/' && window.location.search) {
+        const targetUrl = '/street-golf/' + window.location.search;
+        window.location.href = targetUrl;
+      } else if (window.location.pathname === '/' && !window.location.search && window.location.hostname !== 'localhost') {
+        window.location.href = '/street-golf/';
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

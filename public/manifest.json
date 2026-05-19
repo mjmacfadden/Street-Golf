@@ -2,8 +2,8 @@
   "name": "Street Golf",
   "short_name": "StreetGolf",
   "description": "Urban 9-hole golf tracker and scoring app. Track your street golf adventure in real-time.",
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "/street-golf/",
+  "scope": "/street-golf/",
   "display": "standalone",
   "orientation": "portrait-primary",
   "background_color": "#010409",
@@ -30,7 +30,7 @@
       "name": "Start Round",
       "short_name": "Play",
       "description": "Start a new 9-hole round",
-      "url": "/?action=start",
+      "url": "/street-golf/?action=start",
       "icons": [
         {
           "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'><rect fill='%23BFFF00'/><text x='48' y='48' font-size='64' text-anchor='middle' dominant-baseline='middle'>⛳</text></svg>",
@@ -43,7 +43,7 @@
       "name": "View History",
       "short_name": "History",
       "description": "View your past rounds",
-      "url": "/?action=history",
+      "url": "/street-golf/?action=history",
       "icons": [
         {
           "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'><rect fill='%23BFFF00'/><text x='48' y='48' font-size='64' text-anchor='middle' dominant-baseline='middle'>📊</text></svg>",

@@ -5,8 +5,7 @@ import {
 } from '../config/firebase';
 import {
   signInWithPopup,
-  signInWithRedirect,
-  getRedirectResult,
+  signInWithCredential,
   GoogleAuthProvider,
   signOut,
   User,
@@ -57,13 +56,13 @@ const logToStorage = (message: string) => {
 };
 
 // ---------------------------------------------------------------------------
-// Auth helpers
+// Auth architecture: Custom OAuth handler with window.open + postMessage
 //
-// signInWithPopup  → browser mode only; popup opens as child window, postMessage works fine.
-// signInWithRedirect → standalone PWA mode. Firebase redirects within the same WKWebView
-//                      context; the auth handler lives on street-golf-69679.web.app (same
-//                      eTLD+1 as the app), so ITP never blocks the cross-origin iframe.
-//                      getRedirectResult() is called on every page load to pick up the result.
+// Browser mode: PWA opens custom handler at https://street-golf-69679.firebaseapp.com/auth-handler.html
+//               Handler does signInWithPopup to Google, receives idToken, posts back via postMessage.
+// Standalone mode: Same flow — doesn't break out of the PWA context because handler is a separate
+//                  window, not a popup within the app. iOS/Android stays in PWA while handler
+//                  window manages the OAuth dance with Google.
 // ---------------------------------------------------------------------------
 
 
@@ -82,55 +81,99 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     try {
       setError(null);
       setLoading(true);
-      const isStandalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
-      logToStorage(`🔐 Starting Google sign-in (standalone: ${isStandalone}, authDomain: ${import.meta.env.VITE_FIREBASE_AUTH_DOMAIN})`);
+      logToStorage('🔐 Starting Google sign-in (opening auth handler)...');
 
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
+      // Open the custom auth handler page in a separate window
+      const authWindow = window.open(
+        'https://street-golf-69679.firebaseapp.com/auth-handler.html',
+        'auth-handler',
+        'width=500,height=600'
+      );
 
-      if (isStandalone) {
-        // Redirect navigates the WKWebView to Firebase's auth handler on the same
-        // web.app domain, then back — no popup, no cross-origin iframe, no ITP issue.
-        logToStorage('📲 Standalone: redirecting to Google sign-in...');
-        await signInWithRedirect(auth, provider);
-        // Page navigates away — nothing below this line runs.
+      if (!authWindow) {
+        setError('Popup was blocked. Please check your browser settings.');
+        setLoading(false);
         return;
       }
 
-      // Browser: popup communicates via postMessage — works fine
-      const result = await signInWithPopup(auth, provider);
-      const user = result.user;
-      logToStorage(`✅ Signed in: ${user.email}`);
+      // Listen for the idToken coming back from the auth handler
+      const messageHandler = async (event: MessageEvent) => {
+        // Only trust messages from our Firebase Hosting domain
+        if (event.origin !== 'https://street-golf-69679.firebaseapp.com') return;
 
-      // Create user profile in Firestore if it doesn't exist (non-blocking)
-      try {
-        const userRef = doc(db, 'users', user.uid);
-        const userDoc = await getDoc(userRef);
-        if (!userDoc.exists()) {
-          await setDoc(userRef, {
-            uid: user.uid,
-            email: user.email,
-            displayName: user.displayName,
-            photoURL: user.photoURL,
-            createdAt: new Date().toISOString(),
-          });
-          logToStorage('✅ User profile created in Firestore');
+        if (event.data?.type === 'AUTH_SUCCESS' && event.data?.idToken) {
+          logToStorage('🔐 Received auth token from handler');
+          try {
+            // Sign in to Firebase using the idToken
+            const credential = GoogleAuthProvider.credential(event.data.idToken);
+            const result = await signInWithCredential(auth, credential);
+            const user = result.user;
+            logToStorage(`✅ Signed in: ${user.email}`);
+
+            // Create user profile in Firestore if it doesn't exist
+            try {
+              const userRef = doc(db, 'users', user.uid);
+              const userDoc = await getDoc(userRef);
+              if (!userDoc.exists()) {
+                await setDoc(userRef, {
+                  uid: user.uid,
+                  email: user.email,
+                  displayName: user.displayName,
+                  photoURL: user.photoURL,
+                  createdAt: new Date().toISOString(),
+                });
+                logToStorage('✅ User profile created in Firestore');
+              }
+            } catch (firestoreErr) {
+              logToStorage(`⚠️ Non-critical Firestore error: ${firestoreErr}`);
+            }
+
+            // Clean up
+            window.removeEventListener('message', messageHandler);
+            authWindow.close();
+          } catch (signInErr: any) {
+            logToStorage(`❌ Sign-in error: ${signInErr?.message}`);
+            setError(signInErr?.message || 'Failed to sign in.');
+            setLoading(false);
+            window.removeEventListener('message', messageHandler);
+          }
+        } else if (event.data?.type === 'AUTH_ERROR') {
+          logToStorage(`❌ Handler error: ${event.data?.error}`);
+          setError(event.data?.error || 'Authentication failed.');
+          setLoading(false);
+          window.removeEventListener('message', messageHandler);
+          authWindow.close();
         }
-      } catch (firestoreErr) {
-        logToStorage(`⚠️ Non-critical Firestore error: ${firestoreErr}`);
-      }
+      };
+
+      window.addEventListener('message', messageHandler);
+
+      // Timeout after 5 minutes
+      const timeoutId = setTimeout(() => {
+        logToStorage('⚠️ Auth handler timeout after 5 minutes');
+        window.removeEventListener('message', messageHandler);
+        authWindow.close();
+        setError('Sign-in timed out. Please try again.');
+        setLoading(false);
+      }, 5 * 60 * 1000);
+
+      // Cleanup if window is closed by user
+      const checkWindowClosed = setInterval(() => {
+        if (authWindow?.closed) {
+          clearInterval(checkWindowClosed);
+          clearTimeout(timeoutId);
+          window.removeEventListener('message', messageHandler);
+          logToStorage('ℹ️ Auth handler window closed by user');
+          // Only set error if we're still loading (user didn't complete auth)
+          if (loading) {
+            setError('Sign-in cancelled.');
+            setLoading(false);
+          }
+        }
+      }, 500);
     } catch (err: any) {
-      logToStorage(`❌ Sign-in error: ${err?.code} - ${err?.message}`);
-
-      if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
-        setError('Sign-in cancelled.');
-      } else if (err?.code === 'auth/popup-blocked') {
-        setError('OPEN_IN_BROWSER');
-
-      } else {
-        setError(err?.message || 'Failed to sign in with Google.');
-      }
-
+      logToStorage(`❌ Sign-in error: ${err?.message}`);
+      setError(err?.message || 'Failed to sign in with Google.');
       setLoading(false);
     }
   };
@@ -150,38 +193,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       logToStorage(`❌ Logout Error: ${errorMessage}`);
     }
   };
-
-  // On mount: pick up the result of a signInWithRedirect if one is pending.
-  // This fires on every page load but resolves immediately (null) when there's no redirect.
-  useEffect(() => {
-    getRedirectResult(auth)
-      .then((result) => {
-        if (!result) return; // Normal page load — no pending redirect
-        logToStorage(`✅ Redirect sign-in complete: ${result.user.email}`);
-        // onAuthStateChanged fires automatically; create Firestore profile if needed.
-        const user = result.user;
-        const userRef = doc(db, 'users', user.uid);
-        getDoc(userRef)
-          .then((snap) => {
-            if (!snap.exists()) {
-              return setDoc(userRef, {
-                uid: user.uid,
-                email: user.email,
-                displayName: user.displayName,
-                photoURL: user.photoURL,
-                createdAt: new Date().toISOString(),
-              });
-            }
-          })
-          .catch((err) => logToStorage(`⚠️ Non-critical Firestore error: ${err}`));
-      })
-      .catch((err) => {
-        logToStorage(`❌ Redirect sign-in error: ${err?.message}`);
-        setError(err?.message || 'Sign-in failed. Please try again.');
-        setLoading(false);
-      });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Sync debug logs from localStorage periodically
   useEffect(() => {
