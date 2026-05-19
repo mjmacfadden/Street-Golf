@@ -41,3 +41,4 @@ coverage/
 archived/
 *.zip
 *.rar
+serviceAccountKey.json
