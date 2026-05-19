@@ -13,6 +13,7 @@ import {
 } from '../config/firebase';
 import {
   signInWithRedirect,
+  signInWithPopup,
   getRedirectResult,
   GoogleAuthProvider,
   signOut,
@@ -77,9 +78,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
 
-      // Firebase automatically handles /__/auth/handler behind the scenes
-      await signInWithRedirect(auth, provider);
-      logToStorage('🔐 Redirecting to Google...');
+      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      
+      if (isLocalhost) {
+        // Use popup for localhost development (cross-domain redirects have issues)
+        logToStorage('🔐 Using popup auth for localhost...');
+        await signInWithPopup(auth, provider);
+        logToStorage('✅ Signed in via popup');
+      } else {
+        // Use redirect for production (more secure, works across domains)
+        logToStorage('🔐 Using redirect auth for production...');
+        await signInWithRedirect(auth, provider);
+        logToStorage('🔐 Redirecting to Google...');
+      }
     } catch (err: any) {
       logToStorage(`❌ Sign-in error: ${err?.message}`);
       setError(err?.message || 'Failed to sign in with Google.');
