@@ -63,9 +63,29 @@ const logToStorage = (message: string) => {
 // Standalone mode: Same flow — doesn't break out of the PWA context because handler is a separate
 //                  window, not a popup within the app. iOS/Android stays in PWA while handler
 //                  window manages the OAuth dance with Google.
+// Localhost dev: PWA opens auth handler at http://localhost:5173/auth-handler.html
 // ---------------------------------------------------------------------------
 
+// Helper to get the correct auth handler URL based on environment
+const getAuthHandlerUrl = (): string => {
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    // On localhost, use the actual current origin/port
+    const targetOrigin = window.location.origin;
+    return `${window.location.protocol}//${window.location.host}/street-golf/auth-handler.html?origin=${encodeURIComponent(targetOrigin)}`;
+  }
+  // On production, pass the GitHub Pages origin so the handler knows where to send messages back
+  return 'https://street-golf-69679.firebaseapp.com/auth-handler.html?origin=https://mjmacfadden.github.io';
+};
 
+// Helper to check if origin is trusted (localhost or Firebase domain)
+const isTrustedOrigin = (origin: string): boolean => {
+  return (
+    origin === 'https://street-golf-69679.firebaseapp.com' ||
+    origin === 'https://street-golf-69679.web.app' ||
+    origin.startsWith('http://localhost') ||
+    origin.startsWith('http://127.0.0.1')
+  );
+};
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
@@ -84,8 +104,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       logToStorage('🔐 Starting Google sign-in (opening auth handler)...');
 
       // Open the custom auth handler page in a separate window
+      const authHandlerUrl = getAuthHandlerUrl();
       const authWindow = window.open(
-        'https://street-golf-69679.firebaseapp.com/auth-handler.html',
+        authHandlerUrl,
         'auth-handler',
         'width=500,height=600'
       );
@@ -98,8 +119,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
       // Listen for the idToken coming back from the auth handler
       const messageHandler = async (event: MessageEvent) => {
-        // Only trust messages from our Firebase Hosting domain
-        if (event.origin !== 'https://street-golf-69679.firebaseapp.com') return;
+        // Only trust messages from our auth handler domains
+        if (!isTrustedOrigin(event.origin)) return;
 
         if (event.data?.type === 'AUTH_SUCCESS' && event.data?.idToken) {
           logToStorage('🔐 Received auth token from handler');
