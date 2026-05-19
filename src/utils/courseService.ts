@@ -99,6 +99,7 @@ export const saveCourse = async (
         await setDoc(publicRef, {
           id: courseId,
           userId,
+          creatorUid: userId,
           courseName: course.courseName,
           creatorName: course.creatorName || 'Anonymous',
           holes: course.holes,
@@ -169,7 +170,9 @@ export const publishCourse = async (
       await setDoc(publicRef, {
         id: courseId,
         userId,
+        creatorUid: userId,
         courseName: course.courseName,
+        creatorName: course.creatorName || 'Anonymous',
         holesCount: course.holes.length,
         createdAt: course.createdAt,
         publishedAt: Timestamp.fromDate(now),
