@@ -3,9 +3,6 @@ name: Deploy Auth Handler to Firebase
 on:
   push:
     branches: [main]
-    paths:
-      - 'public/auth-handler.html'
-      - '.github/workflows/deploy-auth-handler.yml'
   workflow_dispatch:
 
 jobs:
