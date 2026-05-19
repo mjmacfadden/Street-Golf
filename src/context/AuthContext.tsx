@@ -1,9 +1,9 @@
 // ---------------------------------------------------------------------------
-// Auth architecture: Simple Firebase redirect-based OAuth
+// Auth architecture: Firebase popup-based OAuth
 //
-// Firebase automatically manages the /__/auth/handler route for OAuth
-// We use signInWithRedirect and getRedirectResult
-// No custom auth-handler.html needed!
+// Uses signInWithPopup for all environments (localhost, GitHub Pages, PWA)
+// Popup mode avoids cross-domain redirect issues since GitHub Pages and
+// Firebase auth handler are on different domains.
 // ---------------------------------------------------------------------------
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
@@ -12,9 +12,7 @@ import {
   db,
 } from '../config/firebase';
 import {
-  signInWithRedirect,
   signInWithPopup,
-  getRedirectResult,
   GoogleAuthProvider,
   signOut,
   User,
@@ -78,19 +76,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
 
-      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-      
-      if (isLocalhost) {
-        // Use popup for localhost development (cross-domain redirects have issues)
-        logToStorage('🔐 Using popup auth for localhost...');
-        await signInWithPopup(auth, provider);
-        logToStorage('✅ Signed in via popup');
-      } else {
-        // Use redirect for production (more secure, works across domains)
-        logToStorage('🔐 Using redirect auth for production...');
-        await signInWithRedirect(auth, provider);
-        logToStorage('🔐 Redirecting to Google...');
-      }
+      // Use popup mode everywhere to avoid cross-domain redirect issues
+      // (GitHub Pages + Firebase auth handler on different domains)
+      logToStorage('🔐 Using popup auth...');
+      await signInWithPopup(auth, provider);
+      logToStorage('✅ Signed in via popup');
     } catch (err: any) {
       logToStorage(`❌ Sign-in error: ${err?.message}`);
       setError(err?.message || 'Failed to sign in with Google.');
@@ -127,41 +117,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     updateLogs();
     const interval = setInterval(updateLogs, 500);
     return () => clearInterval(interval);
-  }, []);
-
-  // Handle redirect result when user returns from Google auth
-  useEffect(() => {
-    const handleRedirectResult = async () => {
-      try {
-        logToStorage('🔐 Checking for redirect result from Google...');
-        const result = await getRedirectResult(auth);
-
-        if (result?.user) {
-          logToStorage(`✅ Signed in via redirect: ${result.user.email}`);
-          // Create user profile if needed
-          try {
-            const userRef = doc(db, 'users', result.user.uid);
-            const userDoc = await getDoc(userRef);
-            if (!userDoc.exists()) {
-              await setDoc(userRef, {
-                uid: result.user.uid,
-                email: result.user.email,
-                displayName: result.user.displayName,
-                photoURL: result.user.photoURL,
-                createdAt: new Date().toISOString(),
-              });
-              logToStorage('✅ User profile created in Firestore');
-            }
-          } catch (firestoreErr) {
-            logToStorage(`⚠️ Non-critical Firestore error: ${firestoreErr}`);
-          }
-        }
-      } catch (err: any) {
-        logToStorage(`❌ Redirect result error: ${err?.message}`);
-      }
-    };
-
-    handleRedirectResult();
   }, []);
 
   // Listen to auth state changes
