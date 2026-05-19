@@ -61,14 +61,15 @@
 <body>
   <div class="container">
     <h1>Street Golf</h1>
-    <p id="status">Signing in...</p>
+    <p id="status">Loading...</p>
+    <button id="signInBtn" onclick="handleSignIn()" style="display: none;">Sign In with Google</button>
     <div id="error" class="error"></div>
   </div>
 
   <script type="module">
     // Firebase config — minimal config for OAuth flow
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js';
-    import { getAuth, signInWithRedirect, getRedirectResult, GoogleAuthProvider } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js';
+    import { getAuth, signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, browserPopupRedirectResolver } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js';
 
     const firebaseConfig = {
       apiKey: "AIzaSyDxlOuLyPw8yWx6SqWVUiKYz-_0lOdOGzU",
@@ -82,36 +83,106 @@
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
 
-    // Get the target origin from the URL query parameter, with fallback to GitHub Pages for production
-    const getTargetOrigin = () => {
+    // Get URL parameters
+    const getUrlParams = () => {
       const params = new URLSearchParams(window.location.search);
-      return params.get('origin') || 'https://mjmacfadden.github.io';
+      return {
+        mode: params.get('mode') || 'popup',
+        origin: params.get('origin') || 'https://mjmacfadden.github.io',
+        return: params.get('return') || null,
+      };
     };
 
-    const sendMessageToOpener = (type, data) => {
-      if (window.opener) {
-        window.opener.postMessage(
-          { type, ...data },
-          getTargetOrigin()
-        );
-      }
-    };
+    // Handle popup mode: receive idToken and send via postMessage
+    const handlePopupMode = async () => {
+      const params = getUrlParams();
+      const statusEl = document.getElementById('status');
+      const errorEl = document.getElementById('error');
+      const btnEl = document.getElementById('signInBtn');
 
-    const handleAuthResult = async () => {
-      try {
+      window.handleSignIn = async () => {
+        try {
+          statusEl.textContent = 'Signing in...';
+          errorEl.textContent = '';
+          btnEl.disabled = true;
+
+          const provider = new GoogleAuthProvider();
+          provider.setCustomParameters({ prompt: 'select_account' });
+
+          const result = await signInWithPopup(auth, provider, browserPopupRedirectResolver);
+          let token = null;
+
+          if (result.user) {
+            token = await result.user.getIdToken(true);
+          }
+
+          statusEl.textContent = 'Completing sign-in...';
+
+          if (window.opener && token) {
+            window.opener.postMessage(
+              { type: 'AUTH_SUCCESS', idToken: token },
+              params.origin
+            );
+            setTimeout(() => window.close(), 500);
+          } else if (!window.opener) {
+            throw new Error('No parent window found.');
+          } else if (!token) {
+            throw new Error('Failed to get authentication token.');
+          }
+        } catch (error) {
+          console.error('Auth error:', error);
+          const errorMsg = error instanceof Error ? error.message : 'Sign-in failed.';
+          errorEl.textContent = errorMsg;
+          statusEl.textContent = 'Error occurred';
+          btnEl.disabled = false;
+
+          if (window.opener) {
+            window.opener.postMessage(
+              { type: 'AUTH_ERROR', error: errorMsg },
+              params.origin
+            );
+          }
+        }
+      };
+
+      window.addEventListener('DOMContentLoaded', () => {
         const statusEl = document.getElementById('status');
-        const errorEl = document.getElementById('error');
+        const btnEl = document.getElementById('signInBtn');
+        statusEl.textContent = 'Click the button to sign in with Google';
+        btnEl.style.display = 'inline-block';
+      });
+    };
 
+    // Handle redirect mode: do OAuth redirect flow, store result, redirect back
+    const handleRedirectMode = async () => {
+      const params = getUrlParams();
+      const statusEl = document.getElementById('status');
+      const errorEl = document.getElementById('error');
+
+      try {
         // Check if we're returning from a redirect
         const result = await getRedirectResult(auth);
-        
-        if (result) {
-          // Successfully authenticated after redirect
-          const idToken = await result.user.getIdToken(true);
-          statusEl.textContent = 'Completing sign-in...';
-          sendMessageToOpener('AUTH_SUCCESS', { idToken });
-          // Close after a short delay to ensure message is received
-          setTimeout(() => window.close(), 500);
+
+        if (result && result.user) {
+          // Successfully authenticated - get token and store it
+          const token = await result.user.getIdToken(true);
+          statusEl.textContent = 'Signing in...';
+
+          // Store the token in sessionStorage so the return page can access it
+          sessionStorage.setItem('street_golf_auth_token', token);
+          sessionStorage.setItem('street_golf_auth_user', JSON.stringify({
+            uid: result.user.uid,
+            email: result.user.email,
+            displayName: result.user.displayName,
+            photoURL: result.user.photoURL,
+          }));
+
+          // Redirect back to the app
+          if (params.return) {
+            window.location.href = params.return + (params.return.includes('?') ? '&auth=success' : '?auth=success');
+          } else {
+            statusEl.textContent = 'Sign-in successful. Redirecting...';
+          }
         } else {
           // First load - initiate the redirect
           statusEl.textContent = 'Redirecting to Google...';
@@ -120,21 +191,29 @@
           await signInWithRedirect(auth, provider);
         }
       } catch (error) {
-        const errorEl = document.getElementById('error');
-        const statusEl = document.getElementById('status');
-
         console.error('Auth error:', error);
-        const errorMsg = error instanceof Error ? error.message : 'Sign-in failed. Please try again.';
+        const errorMsg = error instanceof Error ? error.message : 'Sign-in failed.';
         errorEl.textContent = errorMsg;
         statusEl.textContent = 'Error occurred';
 
-        // Send error back to opener
-        sendMessageToOpener('AUTH_ERROR', { error: errorMsg });
+        // If there's a return URL, redirect with error
+        if (params.return) {
+          setTimeout(() => {
+            window.location.href = params.return + (params.return.includes('?') ? '&auth=error' : '?auth=error');
+          }, 2000);
+        }
       }
     };
 
-    // Handle redirect result or initiate sign-in
-    window.addEventListener('DOMContentLoaded', handleAuthResult);
+    // Initialize based on mode
+    window.addEventListener('DOMContentLoaded', () => {
+      const mode = new URLSearchParams(window.location.search).get('mode') || 'popup';
+      if (mode === 'redirect') {
+        handleRedirectMode();
+      } else {
+        handlePopupMode();
+      }
+    });
   </script>
 </body>
 </html>
