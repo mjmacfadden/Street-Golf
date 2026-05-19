@@ -66,17 +66,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-
-      - name: Install Firebase CLI
-        run: npm install -g firebase-tools
-
-      - name: Deploy Auth Handler to Firebase
-        env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          GOOGLE_APPLICATION_CREDENTIALS: /tmp/serviceAccountKey.json
-        run: |
-          echo "$FIREBASE_SERVICE_ACCOUNT" > /tmp/serviceAccountKey.json
-          cat /tmp/serviceAccountKey.json | head -c 50
-          echo "..."
-          firebase --version
-          firebase deploy --only hosting:auth-handler --project street-golf-69679
