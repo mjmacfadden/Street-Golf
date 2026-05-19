@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "street-golf-69679",
+  "private_key_id": "faf8435f4216963b6e3d64f624c5a471d6d7c75a",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDQvRxG3qV48OoO\n4ZYnNuxa2/+WG3/vHb/zk5JqKgf+EDnPZZ6WDGSeozZpm0qtIpDOFNY1sbgUo3Pl\noPHw2TEVs5yoBiPJl99RjmxrEB+OTqpcWjoVZgP2rYXv9Nf0S643F2jcTzD8F4uI\nCU3A7amSfj8QHVYEKJXzBf3ITaoiPLz//JfKRDoHINL6NLatiM+tt1tQHYSrPP9m\nLspfBU+OVz7vGHh9DWxUu7UeSArdzPtVisUOaC+zHN9uG0w8VdRtn8Vz4QL2cjVA\nLZSQ+nvm8o/bnbkMdVCRwAvvcb5N3VMlv5pR4/ZR0RroL82q8pkMdx4/SjUIJ8aV\nqmnAAc3TAgMBAAECggEAIJYVLv8dB/dcIryWy0JovXpwuQdL/pE/YRAdoFM1cjUo\nQTdU/Ymrv5QtL2ldzA+EWZepJTK8UQR/WE661mWhowiqIRTsS1FZPIsmY8RdmMKx\nF7/CJ4sIfV7zdNVdTTbvWIxgA1ydgg1O7Aq/x6mSelsZDzP1NKr9VbYOu1FciQF4\nM57bPyQz7zdCDsU2NX3E6O/CM2pq0G1OXpMFxmAgRSwjCWJLDq535RkIjd4aaF4z\nEt3753A+ZR1F47ZijxGqmagwaorAzB8CAQD9kiCq/DF+zHZmDOovy+DEOYhBrUTB\n95Wh7BC6w8eNl+HJII3H9PwgdVhcXzv5hxide9/9eQKBgQDrmovvWEt6hcljETms\nF36XcamhXqsvlSDecXCDeqx7p3qS0HsDEeqveW2ZCzFOzzQOGLw9Z4g809BsIFTH\n3MSfB8a0qpbk8Tdejt/ndFhWiP5Z/7NCZh84WcNdzGxdyeRGMy/Va9JlgQlULStH\n1LUCKbChcM0l9CPVGjlXeuRETwKBgQDizy56Z6BX7cHMfaEpsiPh10xgwqpAMmgg\nKIdrg6Oz0O67pSzS2et/8GAb87HdMwoKQukiTV4QUG5uH+c9MwwmYGX801GwwKZB\nQs5zNT/BtTf4WyXT7IReFBdmsQimUFEMCcRaSZ1kkF2mEOI3qODFIeDzH7B8dZ4V\nr+8q7e1JPQKBgCgCKYsuajrXJzisfyerIbMj+RNPGTDOWTOM/fdFyK6C5TyzLIB7\n9Wdw7lyT2v6wDv3p02V2BFuX+Ie0AdGiurzqvCKH6XHdSHLFPl52kl23i8HKuy0m\nXFzcWWG/ShOvKhWFsbTDR4o3HFdwCC59f3NrkvQHTL8KM1+HwX8KfmLfAoGBAJqU\nTb8LBVMoLd8q+D4stRvk2p9PzSz3rdPNC46RJ28URMEK8CO8di66KyahzmVNtdgM\nhkvkoulHiBvyDm29bthw9tF7TL/EbQspdv86GXvyAHV52aw4FHbyBojsu1Juhu5H\ncdV/OpAhfFIES8lXhemVD3Vj8arBlr59K+n8Qq6ZAoGAIdiaqPGV5Zok27NS5+Qx\nGIOw7bWank3AWjPmH3YM/dRo/D0M0EXP7QomP9saaHxz9VptaA9tPxI8DFqIrnG4\nmrGSPeb0jDz58+wk6gL1ve/XeHj7Ah5YKPXYl95fK9JEwq3wg+8K8CTnOK831E7T\nJ+0QAMeO9VHfnmFAZi9lyds=\n-----END PRIVATE KEY-----\n",
+  "client_email": "firebase-adminsdk-fbsvc@street-golf-69679.iam.gserviceaccount.com",
+  "client_id": "102811567544870297823",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40street-golf-69679.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}

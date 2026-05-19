@@ -1,9 +1,9 @@
 // ---------------------------------------------------------------------------
 // Auth architecture: Firebase popup-based OAuth
 //
-// Uses signInWithPopup for all environments (localhost, GitHub Pages, PWA)
-// Popup mode avoids cross-domain redirect issues since GitHub Pages and
-// Firebase auth handler are on different domains.
+// Uses signInWithPopup for browser/web mode.
+// Simple and works everywhere (localhost, GitHub Pages, browser).
+// No PWA standalone mode - app opens in browser with address bar.
 // ---------------------------------------------------------------------------
 
 import React, { createContext, useContext, useEffect, useState } from 'react';

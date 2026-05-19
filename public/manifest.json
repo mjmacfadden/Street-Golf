@@ -4,7 +4,7 @@
   "description": "Urban 9-hole golf tracker and scoring app. Track your street golf adventure in real-time.",
   "start_url": "/street-golf/",
   "scope": "/street-golf/",
-  "display": "standalone",
+  "display": "browser",
   "orientation": "portrait-primary",
   "background_color": "#010409",
   "theme_color": "#BFFF00",
