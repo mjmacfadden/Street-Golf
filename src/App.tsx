@@ -443,7 +443,7 @@ function AppContent() {
                 />
 
                 {currentHoleIdx !== null && (
-                  <div className="absolute left-4 right-4 z-20" style={{ bottom: '45px' }}>
+                  <div className="absolute left-4 right-4 z-20" style={{ bottom: '55px' }}>
                     <motion.div 
                       initial={{ y: 50, opacity: 0 }}
                       animate={{ y: 0, opacity: 1 }}
