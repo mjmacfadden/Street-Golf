@@ -6,11 +6,9 @@ import {
   getAllUsers,
   deleteUserAndData,
   deleteCourseAdmin,
-  migrateCourseToFirebase,
   type Course,
   type AdminUser,
 } from '../utils/courseService';
-import { COURSES } from '../constants/course';
 
 interface AdminPanelProps {
   onClose: () => void;
@@ -23,7 +21,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
-  const [migrating, setMigrating] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<{ type: 'user' | 'course'; id: string; name: string } | null>(null);
   const [expandedUser, setExpandedUser] = useState<string | null>(null);
 
@@ -122,34 +119,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
     document.body.removeChild(a);
   };
 
-  const handleMigrateCourses = async () => {
-    const adminUid = 'NboBOK41rVcAEcs6nhRmrALQ0KC2';
-    setMigrating(true);
-    setError(null);
-    
-    try {
-      // Migrate each hardcoded course
-      for (const course of COURSES) {
-        await migrateCourseToFirebase(
-          adminUid,
-          course.id,
-          course.name,
-          course.location,
-          course.holes
-        );
-      }
-      
-      alert('✅ Successfully migrated Southbridge and Glenbrook courses to Firebase!');
-      // Reload courses
-      await loadData();
-    } catch (err: any) {
-      console.error('Migration failed:', err);
-      setError(`Migration failed: ${err.message}`);
-      alert(`❌ Migration failed: ${err.message}`);
-    } finally {
-      setMigrating(false);
-    }
-  };
+
 
   return (
     <div className="h-full overflow-y-auto p-6 pb-32 bg-white">
@@ -232,20 +202,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
               className="w-full py-2 px-4 bg-blue-100 hover:bg-blue-200 text-blue-700 font-bold rounded-lg transition-colors disabled:opacity-50"
             >
               {loading ? 'Refreshing...' : 'Refresh Data'}
-            </button>
-            <button
-              onClick={handleMigrateCourses}
-              disabled={migrating}
-              className="w-full py-2 px-4 bg-purple-100 hover:bg-purple-200 text-purple-700 font-bold rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              {migrating ? (
-                <>
-                  <Loader size={18} className="animate-spin" />
-                  Migrating Courses...
-                </>
-              ) : (
-                'Migrate Hardcoded Courses to Firebase'
-              )}
             </button>
           </motion.div>
         )}
