@@ -401,11 +401,48 @@ export const deleteRound = async (userId: string, roundId: string): Promise<void
   try {
     const roundRef = doc(db, 'users', userId, 'rounds', roundId);
     await deleteDoc(roundRef);
+    
+    // Verify the deletion actually worked
+    const verifySnapshot = await getDoc(roundRef);
+    if (verifySnapshot.exists()) {
+      throw new Error('Deletion verification failed: Round still exists in Firestore after deleteDoc');
+    }
+    console.log('✅ Deletion verified: Round no longer exists in Firestore');
   } catch (error) {
     if (error instanceof Error) {
       throw new Error(`Failed to delete round: ${error.message}`);
     }
     throw new Error('Failed to delete round: Unknown error');
+  }
+};
+
+/**
+ * Delete all incomplete rounds for a user
+ * This cleans up any stray active rounds
+ */
+export const deleteAllIncompleteRounds = async (userId: string): Promise<void> => {
+  try {
+    const roundsRef = collection(db, 'users', userId, 'rounds');
+    const q = query(roundsRef, where('isCompleted', '==', false));
+    const snapshot = await getDocs(q);
+    
+    if (snapshot.empty) {
+      console.log('✅ No incomplete rounds to clean up');
+      return;
+    }
+    
+    console.log(`🗑️ Cleaning up ${snapshot.size} incomplete round(s)...`);
+    
+    // Delete all incomplete rounds
+    const deletePromises = snapshot.docs.map(doc => deleteDoc(doc.ref));
+    await Promise.all(deletePromises);
+    
+    console.log(`✅ Cleaned up ${snapshot.size} incomplete round(s)`);
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(`Failed to clean up incomplete rounds: ${error.message}`);
+    }
+    throw new Error('Failed to clean up incomplete rounds: Unknown error');
   }
 };
 

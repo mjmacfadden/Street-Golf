@@ -14,9 +14,11 @@ interface ProfileProps {
   onLogout?: () => void;
   onDeleteCourse?: (courseId: string) => void;
   onCloseAuthModal?: () => void;
+  onViewFavoriteCourse?: (course: FirestoreCourse) => void;
+  onViewBuiltCourse?: (course: FirestoreCourse) => void;
 }
 
-export const Profile: React.FC<ProfileProps> = ({ onEditCourse, onLogout, onDeleteCourse, onCloseAuthModal }) => {
+export const Profile: React.FC<ProfileProps> = ({ onEditCourse, onLogout, onDeleteCourse, onCloseAuthModal, onViewFavoriteCourse, onViewBuiltCourse }) => {
   const { currentUser, logout } = useAuth();
   const [courses, setCourses] = useState<FirestoreCourse[]>([]);
   const [favoriteCourses, setFavoriteCourses] = useState<FirestoreCourse[]>([]);
@@ -180,8 +182,8 @@ export const Profile: React.FC<ProfileProps> = ({ onEditCourse, onLogout, onDele
                   className="bg-slate-900/50 border border-slate-700 rounded-2xl p-4 hover:bg-slate-900/70 transition-colors"
                 >
                   <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                      <h4 className="font-black text-white mb-1 truncate uppercase italic">
+                    <div className="flex-1 min-w-0 cursor-pointer" onClick={() => onViewBuiltCourse?.(course)}>
+                      <h4 className="font-black text-white mb-1 truncate uppercase italic hover:text-lime transition-colors">
                         {course.courseName}
                       </h4>
                       <div className="flex gap-4 text-xs text-slate-400">
@@ -244,11 +246,12 @@ export const Profile: React.FC<ProfileProps> = ({ onEditCourse, onLogout, onDele
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: idx * 0.05 }}
-                  className="bg-slate-900/50 border border-slate-700 rounded-2xl p-4 hover:bg-slate-900/70 transition-colors"
+                  onClick={() => onViewFavoriteCourse?.(course)}
+                  className="bg-slate-900/50 border border-slate-700 rounded-2xl p-4 hover:bg-slate-900/70 hover:border-lime/30 transition-colors cursor-pointer group"
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
-                      <h4 className="font-black text-white mb-1 truncate uppercase italic">
+                      <h4 className="font-black text-white mb-1 truncate uppercase italic group-hover:text-lime transition-colors">
                         {course.courseName}
                       </h4>
                       <div className="flex gap-4 text-xs text-slate-400">
@@ -259,7 +262,10 @@ export const Profile: React.FC<ProfileProps> = ({ onEditCourse, onLogout, onDele
 
                     {/* Remove Favorite Button */}
                     <button
-                      onClick={() => handleRemoveFavorite(course.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleRemoveFavorite(course.id);
+                      }}
                       className="p-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors shrink-0"
                       title="Remove from favorites"
                     >

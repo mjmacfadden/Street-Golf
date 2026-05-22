@@ -1,20 +1,25 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, Play, Heart, Search, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Play, Heart, Search, X, MapPin, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { AuthModal } from './AuthModal';
 import { addFavorite, removeFavorite, getUserFavorites } from '../utils/courseService';
 import type { Course as FirestoreCourse } from '../utils/courseService';
 import type { Course } from '../constants/course';
+import { calculateDistance } from '../utils/distance';
 
 interface HomeProps {
   courses: (Course | FirestoreCourse)[];
   onSelectCourse: (course: Course | FirestoreCourse) => void;
   onPlayNow: () => void;
   loading?: boolean;
+  currentRound?: Round | null;
+  onResumeRound?: () => void;
+  onCancelRound?: () => void;
+  userLocation?: { lat: number; lng: number } | null;
 }
 
-export default function Home({ courses, onSelectCourse, onPlayNow, loading = false }: HomeProps) {
+export default function Home({ courses, onSelectCourse, onPlayNow, loading = false, currentRound = null, onResumeRound, onCancelRound, userLocation }: HomeProps) {
   const { currentUser } = useAuth();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -23,6 +28,7 @@ export default function Home({ courses, onSelectCourse, onPlayNow, loading = fal
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [favLoading, setFavLoading] = useState(false);
   const [showFavoriteLoginModal, setShowFavoriteLoginModal] = useState(false);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
   // Load user's favorites
   useEffect(() => {
@@ -32,6 +38,11 @@ export default function Home({ courses, onSelectCourse, onPlayNow, loading = fal
       });
     }
   }, [currentUser]);
+
+  // Reset carousel to first course when courses array changes (e.g., sorted by distance)
+  useEffect(() => {
+    setCurrentIndex(0);
+  }, [courses]);
 
   // Update selected course whenever carousel changes
   useEffect(() => {
@@ -130,6 +141,47 @@ export default function Home({ courses, onSelectCourse, onPlayNow, loading = fal
 
   return (
     <div className="h-full flex flex-col bg-dark">
+      {/* Active Round Banner */}
+      <AnimatePresence>
+        {currentRound && !currentRound.isCompleted && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="bg-gradient-to-r from-lime/20 to-lime/10 border-b border-lime/30 px-6 py-4"
+          >
+            <div className="max-w-2xl mx-auto flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3 flex-1">
+                <div className="w-3 h-3 rounded-full bg-lime animate-pulse" />
+                <div className="flex-1">
+                  <p className="text-lime font-bold text-sm uppercase tracking-tight">Active Round in Progress</p>
+                  <p className="text-lime/80 text-xs mt-1">{currentRound.courseName || 'Unknown Course'}</p>
+                </div>
+              </div>
+              <div className="flex flex-col items-stretch gap-1 w-32">
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={onResumeRound}
+                  className="bg-lime text-dark px-3 py-1.5 rounded-lg font-bold text-xs flex items-center justify-center gap-1 hover:bg-lime/90 transition whitespace-nowrap"
+                >
+                  <MapPin size={14} />
+                  Resume
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setShowCancelConfirm(true)}
+                  className="bg-red-500/20 text-red-400 px-3 py-1.5 rounded-lg font-bold text-xs hover:bg-red-500/30 transition whitespace-nowrap border border-red-500/30"
+                >
+                  Cancel
+                </motion.button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Favorite Login Modal */}
       <AnimatePresence>
         {showFavoriteLoginModal && (
@@ -375,17 +427,52 @@ export default function Home({ courses, onSelectCourse, onPlayNow, loading = fal
         </div>
 
         {/* Course Information */}
-        <div className="flex-1 overflow-y-auto bg-white">
-          <div className="p-6 space-y-4">
+        <div 
+          className="flex-1 overflow-y-auto bg-white p-6 scrollbar-transparent" 
+          style={{ 
+            scrollbarGutter: 'stable',
+            scrollbarColor: 'rgba(180, 180, 180, 0.5) transparent'
+          }}
+        >
+          <style>{`
+            .scrollbar-transparent::-webkit-scrollbar {
+              width: 8px;
+            }
+            .scrollbar-transparent::-webkit-scrollbar-track {
+              background: transparent;
+            }
+            .scrollbar-transparent::-webkit-scrollbar-thumb {
+              background: rgba(180, 180, 180, 0.5);
+              border-radius: 4px;
+            }
+            .scrollbar-transparent::-webkit-scrollbar-thumb:hover {
+              background: rgba(160, 160, 160, 0.7);
+            }
+          `}</style>
+          <div className="space-y-4">
             {currentCourse && (
               <>
                 {/* Header with Name and Favorite */}
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1">
                     <h2 className="text-2xl font-bold text-dark">{getCourseName(currentCourse)}</h2>
-                    {getCreatorName(currentCourse) && (
-                      <p className="text-dark/60 text-sm mt-1">By: {getCreatorName(currentCourse)}</p>
-                    )}
+                    <div className="flex items-center gap-2 mt-2">
+                      {getCreatorName(currentCourse) && (
+                        <p className="text-dark/60 text-sm">By: {getCreatorName(currentCourse)}</p>
+                      )}
+                      {userLocation && currentCourse.holes && currentCourse.holes[0]?.teeLocation && (
+                        <div className="inline-flex items-center gap-1 text-sm text-slate-400 font-bold">
+                          <MapPin size={14} />
+                          {calculateDistance(
+                            userLocation.lat,
+                            userLocation.lng,
+                            currentCourse.holes[0].teeLocation.lat,
+                            currentCourse.holes[0].teeLocation.lng
+                          ).toFixed(1)}{' '}
+                          mi
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   <motion.button
@@ -409,7 +496,7 @@ export default function Home({ courses, onSelectCourse, onPlayNow, loading = fal
                   <h3 className="text-sm font-bold text-dark/70 uppercase tracking-wider mb-3">
                     Holes ({getHoles(currentCourse).length})
                   </h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full">
                     {getHoles(currentCourse).map((hole, idx) => (
                       <div
                         key={`${hole.id || idx}`}
@@ -433,6 +520,56 @@ export default function Home({ courses, onSelectCourse, onPlayNow, loading = fal
             )}
           </div>
         </div>
+
+        {/* Cancel Round Confirmation Modal */}
+        <AnimatePresence>
+          {showCancelConfirm && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowCancelConfirm(false)}
+              className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+            >
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                onClick={(e) => e.stopPropagation()}
+                className="bg-dark border border-red-500/30 rounded-2xl p-6 max-w-sm w-full"
+              >
+                <div className="flex items-start gap-4 mb-4">
+                  <div className="p-2 bg-red-500/20 rounded-lg text-red-400">
+                    <AlertTriangle size={20} />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-white mb-1 uppercase italic">Cancel Round?</h3>
+                    <p className="text-sm text-slate-400">
+                      All progress on this round will be lost. This cannot be undone.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowCancelConfirm(false)}
+                    className="flex-1 px-4 py-2 bg-white/10 rounded-lg text-white font-bold hover:bg-white/20 transition-colors"
+                  >
+                    Keep Playing
+                  </button>
+                  <button
+                    onClick={() => {
+                      onCancelRound?.();
+                      setShowCancelConfirm(false);
+                    }}
+                    className="flex-1 px-4 py-2 bg-red-500 rounded-lg text-white font-bold hover:bg-red-600 transition-colors"
+                  >
+                    Cancel Round
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );

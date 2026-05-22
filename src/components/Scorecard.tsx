@@ -1,14 +1,15 @@
 import { useEffect, useRef } from 'react';
 import { Hole, Round } from '../types';
-import { Trophy, Clock } from 'lucide-react';
+import { Trophy, Clock, MapPin } from 'lucide-react';
 
 interface ScorecardProps {
   round: Round;
   holes: Hole[];
   onFinishRound?: () => void;
+  onViewHole?: (holeIndex: number) => void;
 }
 
-export default function Scorecard({ round, holes, onFinishRound }: ScorecardProps) {
+export default function Scorecard({ round, holes, onFinishRound, onViewHole }: ScorecardProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when all holes have scores
@@ -58,18 +59,19 @@ export default function Scorecard({ round, holes, onFinishRound }: ScorecardProp
       </div>
 
       <div className="space-y-3">
-        {holes.map((hole) => {
+        {holes.map((hole, idx) => {
           const score = round.scores[hole.number];
           return (
             <div 
               key={hole.number}
-              className="flex items-center justify-between p-4 bg-navy/20 rounded-2xl border border-white/5 hover:border-lime/20 transition-all group"
+              onClick={() => onViewHole?.(idx)}
+              className={`flex items-center justify-between p-4 bg-navy/20 rounded-2xl border border-white/5 hover:border-lime/20 transition-all group ${onViewHole ? 'cursor-pointer hover:bg-navy/40' : ''}`}
             >
               <div className="flex items-center gap-4">
                 <div className="w-10 h-10 rounded-xl bg-navy flex items-center justify-center text-sm font-black italic border border-white/5 group-hover:bg-lime group-hover:text-dark transition-colors">
                   {hole.number}
                 </div>
-                <div>
+                <div className="flex-1">
                   <p className="font-black italic uppercase text-sm tracking-tight">{hole.name}</p>
                   <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Par {hole.par}</p>
                 </div>
@@ -81,6 +83,9 @@ export default function Scorecard({ round, holes, onFinishRound }: ScorecardProp
                   </p>
                 ) : (
                   <p className="text-white/10 font-bold">-</p>
+                )}
+                {onViewHole && (
+                  <MapPin size={16} className="text-lime/40 group-hover:text-lime transition-colors" />
                 )}
               </div>
             </div>

@@ -9,8 +9,9 @@ import { Profile } from './components/Profile';
 import HomeComponent from './components/Home';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AuthModal } from './components/AuthModal';
-import { getPublishedCourses, getUserCourses, saveRound, getUserRounds, deleteRound as deleteRoundFromFirestore } from './utils/courseService';
+import { getPublishedCourses, getUserCourses, saveRound, getUserRounds, deleteRound as deleteRoundFromFirestore, deleteAllIncompleteRounds } from './utils/courseService';
 import { captureGPSLocation } from './utils/geolocation';
+import { sortCoursesByDistance } from './utils/distance';
 import type { Course as FirestoreCourse } from './utils/courseService';
 import { STREET_GOLF_COURSE, COURSES, type Course } from './constants/course';
 import { Round, Score } from './types';
@@ -37,6 +38,7 @@ function AppContent() {
   
   // Courses
   const [availableCourses, setAvailableCourses] = useState<Course[]>(COURSES);
+  const [sortedCourses, setSortedCourses] = useState<Course[]>(COURSES);
   const [coursesLoading, setCoursesLoading] = useState(true);
   const [coursesError, setCoursesError] = useState<string | null>(null);
   const [selectedCourse, setSelectedCourse] = useState<Course>(COURSES[0]);
@@ -57,6 +59,21 @@ function AppContent() {
   const [deleteConfirmRound, setDeleteConfirmRound] = useState<string | null>(null);
   const [editingCourse, setEditingCourse] = useState<FirestoreCourse | null>(null);
   const [courseRefreshTrigger, setCourseRefreshTrigger] = useState(0);
+
+  // Helper: Find the first hole without a score in a round
+  const getFirstUnscoredHoleIndex = (round: Round | null, holes: typeof currentCourseHoles): number | null => {
+    if (!round) return null;
+    
+    for (let i = 0; i < holes.length; i++) {
+      const holeNumber = holes[i].number;
+      if (!round.scores[holeNumber]) {
+        return i;
+      }
+    }
+    
+    // All holes scored - round is complete
+    return null;
+  };
 
   // Convert Firestore course to local Course format
   const convertFirestoreCourse = (fsCourse: FirestoreCourse): Course => {
@@ -150,18 +167,57 @@ function AppContent() {
     }
   }, [currentUser, loading, courseRefreshTrigger]);
 
-  // Capture user location when map view is opened and no round is active
+  // Load cached location from localStorage on app startup
   useEffect(() => {
-    console.log('Geolocation effect check:', { activeTab, currentHoleIdx, hasUserLocation: !!userLocation });
-    
-    if (activeTab === 'map' && currentHoleIdx === null && !userLocation) {
-      console.log('Conditions met - starting geolocation capture...');
+    const cachedLocation = localStorage.getItem('userLocation');
+    if (cachedLocation && !userLocation) {
+      try {
+        const location = JSON.parse(cachedLocation);
+        console.log('📍 Loaded cached location:', location);
+        setUserLocation(location);
+      } catch (error) {
+        console.warn('Failed to parse cached location');
+      }
+    }
+  }, []);
+
+  // Capture fresh location on app startup in the background
+  useEffect(() => {
+    if (!loading && !currentHoleIdx) {
+      console.log('📍 Capturing fresh geolocation in background on app startup...');
+      const captureLocation = async () => {
+        try {
+          setLocationError(null);
+          const location = await captureGPSLocation(10000, 10);
+          console.log('✅ Fresh location captured:', location);
+          setUserLocation(location);
+          // Cache the location for next load
+          localStorage.setItem('userLocation', JSON.stringify(location));
+        } catch (error: any) {
+          console.warn('⚠️ Background location capture failed:', error);
+          // Don't show error if we have cached location
+          if (!localStorage.getItem('userLocation')) {
+            setLocationError(error.message || 'Could not get your location');
+          }
+        }
+      };
+
+      captureLocation();
+    }
+  }, [loading, currentHoleIdx]);
+
+  // Capture user location when map view is opened
+  useEffect(() => {
+    if (activeTab === 'map' && currentHoleIdx === null) {
+      console.log('📍 Capturing geolocation for map view...');
       const captureLocation = async () => {
         try {
           setLocationError(null);
           const location = await captureGPSLocation(10000, 10);
           console.log('✅ Location captured successfully:', location);
           setUserLocation(location);
+          // Cache the location for next load
+          localStorage.setItem('userLocation', JSON.stringify(location));
         } catch (error: any) {
           console.warn('❌ Failed to capture location:', error);
           setLocationError(error.message || 'Could not get your location');
@@ -169,10 +225,17 @@ function AppContent() {
       };
 
       captureLocation();
-    } else {
-      console.log('Conditions not met for geolocation capture');
     }
-  }, [activeTab, currentHoleIdx, userLocation]);
+  }, [activeTab, currentHoleIdx]);
+
+  // Sort courses by distance when location becomes available
+  useEffect(() => {
+    if (userLocation && availableCourses.length > 0) {
+      console.log('🎯 Sorting courses by distance from user location...');
+      const sorted = sortCoursesByDistance(availableCourses, userLocation.lat, userLocation.lng);
+      setSortedCourses(sorted);
+    }
+  }, [userLocation, availableCourses]);
 
   // Clear user location when a round is started
   useEffect(() => {
@@ -204,7 +267,16 @@ function AppContent() {
           const userRounds = await getUserRounds(currentUser.uid);
           // Migrate Firestore rounds to ensure they have courseName
           const migratedRounds = userRounds.map(ensureCourseName);
-          setHistory(migratedRounds);
+          
+          // Separate active (incomplete) round from history (completed rounds)
+          const activeRound = migratedRounds.find(r => !r.isCompleted);
+          const completedRounds = migratedRounds.filter(r => r.isCompleted);
+          
+          if (activeRound) {
+            console.log('📝 Restoring active round from Firestore:', { id: activeRound.id, courseName: activeRound.courseName });
+            setCurrentRound(activeRound);
+          }
+          setHistory(completedRounds);
         } catch (error) {
           console.error('Failed to load rounds from Firestore:', error);
           // For logged-in users, do NOT fall back to localStorage
@@ -217,6 +289,7 @@ function AppContent() {
         
         if (savedRound) {
           const round = ensureCourseName(JSON.parse(savedRound));
+          console.log('📝 Restoring active round from localStorage:', { id: round.id, courseName: round.courseName });
           setCurrentRound(round);
         }
         if (savedHistory) {
@@ -283,8 +356,20 @@ function AppContent() {
     saveData();
   }, [currentRound, history, currentUser]);
 
-  const startNewRound = () => {
+  const startNewRound = async () => {
     console.log('🎯 Starting new round with selectedCourse:', selectedCourse);
+    
+    // Clean up any existing incomplete rounds first
+    if (currentUser?.uid) {
+      try {
+        console.log('🧹 Cleaning up any previous incomplete rounds...');
+        await deleteAllIncompleteRounds(currentUser.uid);
+      } catch (error) {
+        console.warn('⚠️ Failed to clean up previous rounds:', error);
+        // Continue anyway - this shouldn't block starting a new round
+      }
+    }
+    
     const roundCourseName = selectedCourse?.name || 'Unknown Course';
     const roundCourseId = selectedCourse?.id || COURSES[0].id;
     
@@ -370,6 +455,54 @@ function AppContent() {
     }
   };
 
+  const handleCancelRound = async () => {
+    if (!currentRound) return;
+    
+    const roundId = currentRound.id;
+    const userId = currentUser?.uid;
+    console.log('❌ Canceling active round:', roundId, 'User:', userId);
+    
+    let deletionSuccessful = false;
+    try {
+      // Delete ALL incomplete rounds to clean up any extras
+      if (userId) {
+        console.log('🗑️ Deleting all incomplete rounds from Firestore...');
+        await deleteAllIncompleteRounds(userId);
+        console.log('✅ All incomplete rounds deleted from Firestore');
+        deletionSuccessful = true;
+      } else {
+        console.log('🗑️ Deleting from localStorage (guest user)...');
+      }
+      
+      // Always clear localStorage as a safety measure (for both logged-in and guest users)
+      localStorage.removeItem('currentRound');
+      console.log('✅ Removed from localStorage');
+      
+      if (!userId) {
+        deletionSuccessful = true;
+      }
+      
+    } catch (error) {
+      console.error('❌ CRITICAL: Failed to cancel round:', error);
+      // Still try to clear localStorage even if Firestore deletion fails
+      localStorage.removeItem('currentRound');
+      // Don't clear UI if deletion fails - let user see the round is still there
+      return;
+    }
+    
+    if (!deletionSuccessful) {
+      console.error('❌ CRITICAL: Deletion was not successful');
+      return;
+    }
+    
+    // Only clear UI after deletion succeeds
+    console.log('🎯 Clearing UI state...');
+    setCurrentRound(null);
+    setCurrentHoleIdx(null);
+    setTempScore(4);
+    console.log('✅ Round cancellation complete');
+  };
+
   if (!hasValidKey) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-dark text-slate-100 p-6 font-sans">
@@ -414,7 +547,8 @@ function AppContent() {
                 className="h-full w-full"
               >
                 <HomeComponent
-                  courses={availableCourses}
+                  courses={userLocation ? sortedCourses : availableCourses}
+                  userLocation={userLocation}
                   onSelectCourse={(course) => {
                     setSelectedCourse(course);
                     setCurrentHoleIdx(null);
@@ -423,6 +557,28 @@ function AppContent() {
                     startNewRound();
                   }}
                   loading={coursesLoading}
+                  currentRound={currentRound}
+                  onResumeRound={() => {
+                    if (currentRound && !currentRound.isCompleted) {
+                      // Set the correct course for the active round
+                      const roundCourse = availableCourses.find(c => c.id === currentRound.courseId) || 
+                                        COURSES.find(c => c.id === currentRound.courseId);
+                      if (roundCourse) {
+                        setSelectedCourse(roundCourse);
+                      }
+                      
+                      setActiveTab('map');
+                      setTimeout(() => {
+                        const firstUnscoredIdx = getFirstUnscoredHoleIndex(currentRound, roundCourse?.holes || currentCourseHoles);
+                        if (firstUnscoredIdx !== null) {
+                          console.log('📍 Resuming round at hole:', firstUnscoredIdx + 1, 'on course:', roundCourse?.name);
+                          setCurrentHoleIdx(firstUnscoredIdx);
+                          setTempScore((roundCourse?.holes || currentCourseHoles)[firstUnscoredIdx].par);
+                        }
+                      }, 500);
+                    }
+                  }}
+                  onCancelRound={handleCancelRound}
                 />
               </motion.div>
             )}
@@ -436,7 +592,7 @@ function AppContent() {
                 className="h-full w-full relative"
               >
                 <MapView 
-                  holes={currentCourseHoles} 
+                  holes={currentHoleIdx !== null ? currentCourseHoles : []} 
                   currentHoleIndex={currentHoleIdx}
                   onMarkerClick={(idx) => setCurrentHoleIdx(idx)}
                   userLocation={userLocation || undefined}
@@ -599,7 +755,15 @@ function AppContent() {
                 className="h-full overflow-y-auto bg-dark"
               >
                 {currentRound ? (
-                  <Scorecard round={currentRound} holes={currentCourseHoles} onFinishRound={finishRound} />
+                  <Scorecard 
+                    round={currentRound} 
+                    holes={currentCourseHoles} 
+                    onFinishRound={finishRound}
+                    onViewHole={(holeIndex) => {
+                      setActiveTab('map');
+                      setCurrentHoleIdx(holeIndex);
+                    }}
+                  />
                 ) : (
                   <div className="h-full flex flex-col items-center justify-center p-6">
                     <div className="text-center">
@@ -707,6 +871,68 @@ function AppContent() {
                   }}
                   onDeleteCourse={(courseId) => {
                     setAvailableCourses(availableCourses.filter(c => c.id !== courseId));
+                  }}
+                  onViewFavoriteCourse={(course) => {
+                    // Convert Firestore course to local format
+                    const localCourse: Course = {
+                      id: course.id,
+                      name: course.courseName,
+                      location: 'Published Course',
+                      headerImage: course.headerImage || null,
+                      holes: course.holes.map((hole, idx) => ({
+                        number: idx + 1,
+                        name: hole.name,
+                        teeLocation: hole.teeLocation,
+                        teeDescription: hole.teeDescription,
+                        teeImage: hole.teeImage || undefined,
+                        pinLocation: hole.pinLocation,
+                        pinDescription: hole.pinDescription,
+                        pinImage: hole.pinImage || undefined,
+                        par: hole.par,
+                        tip: hole.tip,
+                        hazard: hole.hazard,
+                      })),
+                    };
+                    
+                    setSelectedCourse(localCourse);
+                    setActiveTab('map');
+                    
+                    setTimeout(() => {
+                      setCurrentHoleIdx(0);
+                      setTempScore(localCourse.holes[0].par);
+                      console.log('🗺️ Viewing favorite course:', localCourse.name);
+                    }, 300);
+                  }}
+                  onViewBuiltCourse={(course) => {
+                    // Convert Firestore course to local format
+                    const localCourse: Course = {
+                      id: course.id,
+                      name: course.courseName,
+                      location: 'User Created Course',
+                      headerImage: course.headerImage || null,
+                      holes: course.holes.map((hole, idx) => ({
+                        number: idx + 1,
+                        name: hole.name,
+                        teeLocation: hole.teeLocation,
+                        teeDescription: hole.teeDescription,
+                        teeImage: hole.teeImage || undefined,
+                        pinLocation: hole.pinLocation,
+                        pinDescription: hole.pinDescription,
+                        pinImage: hole.pinImage || undefined,
+                        par: hole.par,
+                        tip: hole.tip,
+                        hazard: hole.hazard,
+                      })),
+                    };
+                    
+                    setSelectedCourse(localCourse);
+                    setActiveTab('map');
+                    
+                    setTimeout(() => {
+                      setCurrentHoleIdx(0);
+                      setTempScore(localCourse.holes[0].par);
+                      console.log('🗺️ Viewing built course:', localCourse.name);
+                    }, 300);
                   }}
                 />
               </motion.div>
@@ -861,7 +1087,27 @@ function AppContent() {
               active={activeTab === 'map'} 
               icon={<MapIcon strokeWidth={3} />} 
               label="Map" 
-              onClick={() => setActiveTab('map')} 
+              onClick={() => {
+                setActiveTab('map');
+                // Auto-resume if there's an active round and no hole is currently selected
+                if (currentRound && !currentRound.isCompleted && currentHoleIdx === null) {
+                  setTimeout(() => {
+                    // Set the correct course for the active round
+                    const roundCourse = availableCourses.find(c => c.id === currentRound.courseId) || 
+                                      COURSES.find(c => c.id === currentRound.courseId);
+                    if (roundCourse) {
+                      setSelectedCourse(roundCourse);
+                    }
+                    
+                    const firstUnscoredIdx = getFirstUnscoredHoleIndex(currentRound, roundCourse?.holes || currentCourseHoles);
+                    if (firstUnscoredIdx !== null) {
+                      console.log('📍 Auto-resuming round at hole:', firstUnscoredIdx + 1, 'on course:', roundCourse?.name);
+                      setCurrentHoleIdx(firstUnscoredIdx);
+                      setTempScore((roundCourse?.holes || currentCourseHoles)[firstUnscoredIdx].par);
+                    }
+                  }, 500);
+                }
+              }} 
             />
             <NavButton 
               active={activeTab === 'scorecard'} 
