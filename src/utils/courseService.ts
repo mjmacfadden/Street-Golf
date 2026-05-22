@@ -36,6 +36,7 @@ export interface Course {
   headerImage?: string | null;
   holes: CourseHole[];
   status: 'draft' | 'published';
+  visibility?: 'public' | 'private'; // 'public' = appears in index, 'private' = hidden but shareable via URL
   createdAt: Date;
   updatedAt: Date;
   publishedAt?: Date;
@@ -78,9 +79,25 @@ export const saveCourse = async (
     const courseId = doc(collection(db, 'users', userId, 'courses')).id;
     const courseRef = doc(db, 'users', userId, 'courses', courseId);
 
+    // Clean holes - reconstruct each hole with only expected fields to prevent undefined
+    const cleanedHoles = course.holes.map(hole => ({
+      id: hole.id || '',
+      name: hole.name || '',
+      par: hole.par || 3,
+      teeLocation: hole.teeLocation || null,
+      pinLocation: hole.pinLocation || null,
+      teeImage: hole.teeImage || null,
+      pinImage: hole.pinImage || null,
+      teeDescription: hole.teeDescription || '',
+      pinDescription: hole.pinDescription || '',
+      tip: hole.tip || '',
+      hazard: hole.hazard === true,
+    }));
+
     const now = new Date();
-    const courseData = {
+    const courseData: any = {
       ...course,
+      holes: cleanedHoles,
       id: courseId,
       userId,
       createdAt: Timestamp.fromDate(now),
@@ -89,6 +106,11 @@ export const saveCourse = async (
         publishedAt: Timestamp.fromDate(now),
       }),
     };
+
+    // Remove any undefined values from the entire object
+    Object.keys(courseData).forEach(key => {
+      if (courseData[key] === undefined) delete courseData[key];
+    });
 
     await setDoc(courseRef, courseData);
 
@@ -105,6 +127,7 @@ export const saveCourse = async (
           holes: course.holes,
           holesCount: course.holes.length,
           headerImage: course.headerImage || null,
+          visibility: course.visibility || 'public',
           createdAt: Timestamp.fromDate(now),
           updatedAt: Timestamp.fromDate(now),
           publishedAt: Timestamp.fromDate(now),
@@ -136,7 +159,8 @@ export const saveCourse = async (
  */
 export const publishCourse = async (
   userId: string,
-  courseId: string
+  courseId: string,
+  visibility: 'public' | 'private' = 'public'
 ): Promise<Course> => {
   try {
     const courseRef = doc(db, 'users', userId, 'courses', courseId);
@@ -158,6 +182,7 @@ export const publishCourse = async (
     const publishedData = {
       ...course,
       status: 'published' as const,
+      visibility: visibility,
       updatedAt: Timestamp.fromDate(now),
       publishedAt: Timestamp.fromDate(now),
     };
@@ -173,6 +198,7 @@ export const publishCourse = async (
         creatorUid: userId,
         courseName: course.courseName,
         creatorName: course.creatorName || 'Anonymous',
+        visibility: visibility,
         holesCount: course.holes.length,
         createdAt: course.createdAt,
         publishedAt: Timestamp.fromDate(now),
@@ -190,6 +216,31 @@ export const publishCourse = async (
       throw new Error(`Failed to publish course: ${error.message}`);
     }
     throw new Error('Failed to publish course: Unknown error');
+  }
+};
+
+/**
+ * Update course visibility (public or private)
+ * @param userId - User ID (owner)
+ * @param courseId - Course ID
+ * @param visibility - 'public' (appears in index) or 'private' (hidden but shareable via URL)
+ */
+export const updateCourseVisibility = async (
+  userId: string,
+  courseId: string,
+  visibility: 'public' | 'private'
+): Promise<void> => {
+  try {
+    // Update in user's courses
+    const userCourseRef = doc(db, 'users', userId, 'courses', courseId);
+    await setDoc(userCourseRef, { visibility }, { merge: true });
+
+    // Update in public courses collection if published
+    const publicRef = doc(db, 'courses', courseId);
+    await setDoc(publicRef, { visibility }, { merge: true });
+  } catch (error) {
+    console.error('Failed to update course visibility:', error);
+    throw error;
   }
 };
 
@@ -225,7 +276,7 @@ export const getUserCourses = async (userId: string): Promise<Course[]> => {
 
 /**
  * Get all published courses (for discovery)
- * @returns Array of published courses
+ * @returns Array of published courses filtered to public visibility
  */
 export const getPublishedCourses = async (): Promise<Course[]> => {
   try {
@@ -234,17 +285,19 @@ export const getPublishedCourses = async (): Promise<Course[]> => {
       orderBy('publishedAt', 'desc')
     );
     const snapshot = await getDocs(q);
-    return snapshot.docs.map((doc) => {
-      const data = doc.data();
-      // Get full course data from user's courses
-      return {
-        ...data,
-        id: doc.id,
-        createdAt: data.createdAt?.toDate() || new Date(),
-        updatedAt: data.updatedAt?.toDate() || new Date(),
-        publishedAt: data.publishedAt?.toDate(),
-      } as Course;
-    });
+    return snapshot.docs
+      .map((doc) => {
+        const data = doc.data();
+        // Get full course data from user's courses
+        return {
+          ...data,
+          id: doc.id,
+          createdAt: data.createdAt?.toDate() || new Date(),
+          updatedAt: data.updatedAt?.toDate() || new Date(),
+          publishedAt: data.publishedAt?.toDate(),
+        } as Course;
+      })
+      .filter(course => course.visibility !== 'private'); // Filter out private courses
   } catch (error) {
     if (error instanceof Error) {
       throw new Error(`Failed to fetch published courses: ${error.message}`);
@@ -252,6 +305,34 @@ export const getPublishedCourses = async (): Promise<Course[]> => {
     throw new Error('Failed to fetch published courses: Unknown error');
   }
 };
+
+/**
+ * Get a course by ID (including private courses for sharing)
+ * @param courseId - Course ID
+ * @returns Course data or null if not found
+ */
+export const getCourseById = async (courseId: string): Promise<Course | null> => {
+  try {
+    const docRef = doc(db, 'courses', courseId);
+    const docSnap = await getDoc(docRef);
+    
+    if (!docSnap.exists()) {
+      return null;
+    }
+    
+    const data = docSnap.data();
+    return {
+      ...data,
+      id: docSnap.id,
+      createdAt: data.createdAt?.toDate() || new Date(),
+      updatedAt: data.updatedAt?.toDate() || new Date(),
+      publishedAt: data.publishedAt?.toDate(),
+    } as Course;
+  } catch (error) {
+    console.error(`Failed to fetch course ${courseId}:`, error);
+    return null;
+  }
+}
 
 /**
  * Get a specific course by ID

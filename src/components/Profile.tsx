@@ -40,11 +40,15 @@ export const Profile: React.FC<ProfileProps> = ({ onEditCourse, onLogout, onDele
         const userCourses = await getUserCourses(currentUser.uid);
         setCourses(userCourses);
 
-        // Fetch favorites
+        // Fetch favorites - include both published (public) courses and user's own courses (includes private)
         const favoriteIds = await getUserFavorites(currentUser.uid);
         if (favoriteIds.length > 0) {
           const publishedCourses = await getPublishedCourses();
-          const favorites = publishedCourses.filter(course => favoriteIds.includes(course.id));
+          // Combine published courses with user's own courses to include private ones they created
+          const allAccessibleCourses = [...publishedCourses, ...userCourses];
+          // Remove duplicates (by id) and filter to only favorited
+          const deduped = Array.from(new Map(allAccessibleCourses.map(c => [c.id, c])).values());
+          const favorites = deduped.filter(course => favoriteIds.includes(course.id));
           setFavoriteCourses(favorites);
         } else {
           setFavoriteCourses([]);
@@ -195,6 +199,9 @@ export const Profile: React.FC<ProfileProps> = ({ onEditCourse, onLogout, onDele
                             <span className="text-slate-500">Draft</span>
                           )}
                         </span>
+                        {course.status === 'published' && course.visibility === 'private' && (
+                          <span className="text-orange-400 font-bold">🔒 Private</span>
+                        )}
                         <span>
                           Created {course.createdAt.toLocaleDateString()}
                         </span>

@@ -9,7 +9,7 @@ import { Profile } from './components/Profile';
 import HomeComponent from './components/Home';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AuthModal } from './components/AuthModal';
-import { getPublishedCourses, getUserCourses, saveRound, getUserRounds, deleteRound as deleteRoundFromFirestore, deleteAllIncompleteRounds } from './utils/courseService';
+import { getPublishedCourses, getUserCourses, getCourseById, saveRound, getUserRounds, deleteRound as deleteRoundFromFirestore, deleteAllIncompleteRounds } from './utils/courseService';
 import { captureGPSLocation } from './utils/geolocation';
 import { sortCoursesByDistance } from './utils/distance';
 import type { Course as FirestoreCourse } from './utils/courseService';
@@ -151,6 +151,28 @@ function AppContent() {
           }
         }
 
+        // Check for shared course via URL parameter (?c=courseId)
+        const params = new URLSearchParams(window.location.search);
+        const sharedCourseId = params.get('c');
+        if (sharedCourseId) {
+          try {
+            console.log('🔄 Loading shared course:', sharedCourseId);
+            const sharedCourse = await getCourseById(sharedCourseId);
+            if (sharedCourse) {
+              // Check if not already in courses array
+              if (!courses.find(c => c.id === sharedCourseId)) {
+                const converted = convertFirestoreCourse(sharedCourse);
+                courses.push(converted);
+                console.log('✅ Loaded shared course:', sharedCourse.courseName);
+              }
+            } else {
+              console.warn('⚠️ Shared course not found:', sharedCourseId);
+            }
+          } catch (err) {
+            console.warn('⚠️ Failed to load shared course:', err);
+          }
+        }
+
         setAvailableCourses(courses);
         console.log(`✅ Course fetch completed in ${performance.now() - startTime}ms. Total courses: ${courses.length}`);
       } catch (error) {
@@ -276,9 +298,11 @@ function AppContent() {
   useEffect(() => {
     const loadData = async () => {
       const ensureCourseName = (round: Round) => {
+        // Rounds should already have courseName stored from when they were created
         if (round.courseName) return round;
-        // Only use COURSES for lookups to avoid overwriting with stale availableCourses
-        const course = COURSES.find(c => c.id === round.courseId);
+        
+        // Fallback: try to find from availableCourses in case old rounds don't have it
+        const course = availableCourses.find(c => c.id === round.courseId);
         return { ...round, courseName: course?.name || 'Unknown Course' };
       };
 
@@ -323,7 +347,7 @@ function AppContent() {
     if (!loading) {
       loadData();
     }
-  }, [currentUser, loading]);
+  }, [currentUser, loading, availableCourses]);
 
   // Save persistence (Firestore for logged-in users, localStorage for guests)
   useEffect(() => {

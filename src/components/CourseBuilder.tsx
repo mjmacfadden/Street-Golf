@@ -11,7 +11,7 @@ import { LocationVerificationModal } from './LocationVerificationModal';
 import { ManualLocationInput } from './ManualLocationInput';
 import type { Course as FirestoreCourse } from '../utils/courseService';
 import { db } from '../config/firebase';
-import { updateDoc, doc, Timestamp } from 'firebase/firestore';
+import { updateDoc, setDoc, doc, Timestamp } from 'firebase/firestore';
 
 interface HoleInProgress {
   id: string;
@@ -106,6 +106,7 @@ export default function CourseBuilder({
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [publishSuccess, setPublishSuccess] = useState(false);
+  const [courseVisibility, setCourseVisibility] = useState<'public' | 'private'>('public');
 
   const [currentHole, setCurrentHole] = useState<Partial<HoleInProgress>>({
     name: '',
@@ -122,6 +123,18 @@ export default function CourseBuilder({
 
   const [editingHoleData, setEditingHoleData] = useState<Partial<HoleInProgress> | null>(null);
 
+  // Counter for unique hole IDs
+  const holeIdCounterRef = useRef(0);
+
+  // Helper function to regenerate hole IDs to ensure uniqueness
+  const regenerateHoleIds = (holesToRegenerate: HoleInProgress[]) => {
+    holeIdCounterRef.current = 0;
+    return holesToRegenerate.map((hole, idx) => ({
+      ...hole,
+      id: `hole-${++holeIdCounterRef.current}`
+    }));
+  };
+
   // Get refs for edit camera/file inputs
   const editTeeCameraInputRef = useRef<HTMLInputElement>(null);
   const editTeeFileInputRef = useRef<HTMLInputElement>(null);
@@ -136,6 +149,9 @@ export default function CourseBuilder({
     if (editingCourse) {
       setCourseName(editingCourse.courseName);
       setCourseHeaderImage(editingCourse.headerImage || null);
+      setCourseVisibility(editingCourse.visibility || 'public');
+      
+      // Convert and regenerate IDs to ensure uniqueness
       const convertedHoles: HoleInProgress[] = editingCourse.holes.map(hole => ({
         id: hole.id,
         name: hole.name,
@@ -149,7 +165,11 @@ export default function CourseBuilder({
         tip: hole.tip,
         hazard: hole.hazard,
       }));
-      setHoles(convertedHoles);
+      
+      // Regenerate hole IDs to ensure they're unique
+      const holesWithUniqueIds = regenerateHoleIds(convertedHoles);
+      setHoles(holesWithUniqueIds);
+      
       setCurrentHole({
         name: '',
         par: 3,
@@ -162,14 +182,13 @@ export default function CourseBuilder({
         tip: '',
         hazard: false,
       });
-      setCourseHeaderImage(null);
     }
   }, [editingCourse]);
 
   const addHole = () => {
     if (currentHole.name && currentHole.teeLocation && currentHole.pinLocation) {
       const newHole: HoleInProgress = {
-        id: `hole-${Date.now()}`,
+        id: `hole-${++holeIdCounterRef.current}`,
         name: currentHole.name || '',
         par: currentHole.par || 3,
         teeLocation: currentHole.teeLocation,
@@ -281,12 +300,44 @@ export default function CourseBuilder({
         // Update existing course
         const courseRef = doc(db, 'users', currentUser.uid, 'courses', editingCourse.id);
         
-        await updateDoc(courseRef, {
-          courseName,
-          holes,
+        // Clean holes array - reconstruct each hole with only expected fields
+        const cleanedHoles = holes.map(hole => ({
+          id: hole.id || '',
+          name: hole.name || '',
+          par: hole.par || 3,
+          teeLocation: hole.teeLocation || null,
+          pinLocation: hole.pinLocation || null,
+          teeImage: hole.teeImage || null,
+          pinImage: hole.pinImage || null,
+          teeDescription: hole.teeDescription || '',
+          pinDescription: hole.pinDescription || '',
+          tip: hole.tip || '',
+          hazard: hole.hazard === true,
+        }));
+        
+        // Build update object, removing any undefined values
+        const updateData: any = {
+          courseName: courseName || '',
+          holes: cleanedHoles,
           headerImage: courseHeaderImage || null,
           creatorName: currentUser.displayName || currentUser.email || 'Anonymous',
+          visibility: courseVisibility,
           updatedAt: Timestamp.now(),
+        };
+        
+        // Remove any undefined values
+        Object.keys(updateData).forEach(key => {
+          if (updateData[key] === undefined) delete updateData[key];
+        });
+        
+        await updateDoc(courseRef, updateData);
+
+        // Also update visibility in public courses collection
+        const publicRef = doc(db, 'courses', editingCourse.id);
+        await updateDoc(publicRef, {
+          visibility: courseVisibility,
+        }).catch(() => {
+          // It's okay if this fails - course might not be in public collection yet
         });
 
         setPublishSuccess(true);
@@ -312,13 +363,49 @@ export default function CourseBuilder({
         }, 2000);
       } else {
         // Create new course
-        await saveCourse(currentUser.uid, {
-          courseName,
+        // Clean holes array - reconstruct each hole with only expected fields
+        const cleanedHoles = holes.map(hole => ({
+          id: hole.id || '',
+          name: hole.name || '',
+          par: hole.par || 3,
+          teeLocation: hole.teeLocation || null,
+          pinLocation: hole.pinLocation || null,
+          teeImage: hole.teeImage || null,
+          pinImage: hole.pinImage || null,
+          teeDescription: hole.teeDescription || '',
+          pinDescription: hole.pinDescription || '',
+          tip: hole.tip || '',
+          hazard: hole.hazard === true,
+        }));
+        
+        const courseId = await saveCourse(currentUser.uid, {
+          courseName: courseName || '',
           headerImage: courseHeaderImage || null,
           creatorName: currentUser.displayName || currentUser.email || 'Anonymous',
-          holes,
+          holes: cleanedHoles,
           status: 'published',
+          visibility: courseVisibility,
         });
+
+        // Add to public courses collection with visibility
+        try {
+          const publicRef = doc(db, 'courses', courseId);
+          await setDoc(publicRef, {
+            id: courseId,
+            userId: currentUser.uid,
+            creatorUid: currentUser.uid,
+            courseName,
+            creatorName: currentUser.displayName || currentUser.email || 'Anonymous',
+            visibility: courseVisibility,
+            holesCount: holes.length,
+            createdAt: Timestamp.now(),
+            publishedAt: Timestamp.now(),
+            previewTeeImage: holes[0]?.teeImage || null,
+            previewPinImage: holes[0]?.pinImage || null,
+          });
+        } catch (err) {
+          console.warn('Failed to add course to public collection:', err);
+        }
 
         setPublishSuccess(true);
         onCourseSaved?.();
@@ -341,6 +428,7 @@ export default function CourseBuilder({
           });
           setCourseHeaderImage(null);
           setPublishSuccess(false);
+          setCourseVisibility('public');
         }, 2000);
       }
     } catch (error) {
@@ -780,6 +868,37 @@ export default function CourseBuilder({
             </div>
 
             <div>
+              <label className="text-white/70 text-xs font-bold uppercase tracking-wider mb-2 block">Visibility</label>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setCourseVisibility('public')}
+                  className={`flex-1 px-4 py-2 rounded-lg font-bold text-sm transition ${
+                    courseVisibility === 'public'
+                      ? 'bg-lime text-dark'
+                      : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'
+                  }`}
+                >
+                  🌍 Public (In Index)
+                </button>
+                <button
+                  onClick={() => setCourseVisibility('private')}
+                  className={`flex-1 px-4 py-2 rounded-lg font-bold text-sm transition ${
+                    courseVisibility === 'private'
+                      ? 'bg-lime text-dark'
+                      : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'
+                  }`}
+                >
+                  🔒 Private (URL Only)
+                </button>
+              </div>
+              <p className="text-white/50 text-xs mt-1">
+                {courseVisibility === 'public'
+                  ? 'Anyone can discover this course in the app'
+                  : 'Only accessible via a direct link (e.g., ?c=course-id)'}
+              </p>
+            </div>
+
+            <div>
               <label className="text-white/70 text-xs font-bold uppercase tracking-wider mb-2 block">Course Header Image</label>
               <div className="relative">
                 <div className="w-full aspect-video bg-white/5 border border-white/20 rounded-lg overflow-hidden flex items-center justify-center">
@@ -891,7 +1010,17 @@ export default function CourseBuilder({
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: 20 }}
                   className="bg-white/5 border border-white/10 rounded-xl p-4 backdrop-blur-sm cursor-pointer hover:border-lime/30 hover:bg-white/10 transition"
-                  onClick={() => setExpandedHole(expandedHole === hole.id ? null : hole.id)}
+                  onClick={() => {
+                    if (expandedHole === hole.id) {
+                      // Already expanded, close it
+                      setExpandedHole(null);
+                      setEditingHoleId(null);
+                      setEditingHoleData(null);
+                    } else {
+                      // Not expanded, open it in edit mode
+                      editHole(hole);
+                    }
+                  }}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3 flex-1">
@@ -903,28 +1032,16 @@ export default function CourseBuilder({
                         <p className="text-white/50 text-sm">Par {hole.par} {hole.hazard && '• Hazard'}</p>
                       </div>
                     </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          editHole(hole);
-                        }}
-                        className="p-2 hover:bg-lime/20 rounded-lg text-lime hover:text-lime transition"
-                        title="Edit hole"
-                      >
-                        <Pencil size={18} />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeHole(hole.id);
-                        }}
-                        className="p-2 hover:bg-red-500/20 rounded-lg text-white/50 hover:text-red-400 transition"
-                        title="Delete hole"
-                      >
-                        <Trash2 size={18} />
-                      </button>
-                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeHole(hole.id);
+                      }}
+                      className="p-2 hover:bg-red-500/20 rounded-lg text-white/50 hover:text-red-400 transition"
+                      title="Delete hole"
+                    >
+                      <Trash2 size={18} />
+                    </button>
                   </div>
 
                   {/* Expanded Details or Edit Form */}
@@ -935,39 +1052,42 @@ export default function CourseBuilder({
                         animate={{ opacity: 1, height: 'auto' }}
                         exit={{ opacity: 0, height: 0 }}
                         className="mt-4 pt-4 border-t border-white/10 space-y-4 text-sm"
+                        onClick={(e) => e.stopPropagation()}
                       >
-                        {editingHoleId === hole.id && editingHoleData ? (
-                          // Edit mode form
-                          <div className="space-y-4">
-                            {/* Hole Name & Par */}
-                            <div className="grid grid-cols-3 gap-3">
-                              <div className="col-span-2">
-                                <label className="text-white/70 text-xs font-bold uppercase tracking-wider mb-2 block">Hole Name</label>
-                                <input
-                                  type="text"
-                                  value={editingHoleData.name || ''}
-                                  onChange={(e) => setEditingHoleData({ ...editingHoleData, name: e.target.value })}
-                                  className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-white/40 focus:outline-none focus:border-lime/50 text-sm"
-                                />
-                              </div>
-                              <div>
-                                <label className="text-white/70 text-xs font-bold uppercase tracking-wider mb-2 block">Par</label>
-                                <select
-                                  value={editingHoleData.par || 3}
-                                  onChange={(e) => setEditingHoleData({ ...editingHoleData, par: parseInt(e.target.value) })}
-                                  className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm"
-                                >
-                                  <option value={3}>Par 3</option>
-                                  <option value={4}>Par 4</option>
-                                  <option value={5}>Par 5</option>
-                                </select>
-                              </div>
+                        {/* Edit mode form */}
+                        <div className="space-y-4">
+                          {/* Hole Name & Par */}
+                          <div className="grid grid-cols-3 gap-3">
+                            <div className="col-span-2">
+                              <label className="text-white/70 text-xs font-bold uppercase tracking-wider mb-2 block">Hole Name</label>
+                              <input
+                                type="text"
+                                value={editingHoleData?.name || ''}
+                                onChange={(e) => editingHoleData && setEditingHoleData({ ...editingHoleData, name: e.target.value })}
+                                placeholder="e.g., Main Street Marker"
+                                className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-white/40 focus:outline-none focus:border-lime/50 focus:bg-white/15 transition text-sm"
+                              />
                             </div>
+                            <div>
+                              <label className="text-white/70 text-xs font-bold uppercase tracking-wider mb-2 block">Par</label>
+                              <select
+                                value={editingHoleData?.par || 3}
+                                onChange={(e) => editingHoleData && setEditingHoleData({ ...editingHoleData, par: parseInt(e.target.value) })}
+                                className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-lime/50 focus:bg-white/15 transition text-sm"
+                              >
+                                <option value={3}>Par 3</option>
+                                <option value={4}>Par 4</option>
+                                <option value={5}>Par 5</option>
+                              </select>
+                            </div>
+                          </div>
 
-                            {/* Tee Location Edit */}
-                            <div className="bg-white/5 border border-white/10 rounded-lg p-3 space-y-2">
-                              <div className="text-xs font-bold uppercase tracking-wider text-white">Tee Location</div>
-                              <div className="flex gap-2">
+                            {/* TEE SECTION */}
+                            <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-3">
+                              <h4 className="text-white/80 text-xs font-bold uppercase tracking-wider">Tee Location</h4>
+                              
+                              {/* Drop Tee & Add Photo Tee */}
+                              <div className="grid grid-cols-2 gap-3">
                                 <button
                                   onClick={() => {
                                     if (editingHoleData.teeLocation) {
@@ -977,35 +1097,210 @@ export default function CourseBuilder({
                                     }
                                   }}
                                   disabled={editTeeCpsLoading}
-                                  className="flex-1 text-left text-xs font-bold py-2 px-3 bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg text-lime"
+                                  className={`group bg-gradient-to-b border rounded-lg p-3 transition ${
+                                    editingHoleData.teeLocation
+                                      ? 'from-lime/20 to-lime/10 border-lime/50 hover:border-lime/70'
+                                      : 'from-white/10 to-white/5 border-white/20 hover:border-lime/50 disabled:border-white/10 disabled:opacity-60 disabled:hover:bg-white/5'
+                                  } hover:bg-white/15`}
                                 >
-                                  {editTeeCpsLoading ? 'Acquiring GPS...' : editingHoleData.teeLocation ? 'View' : 'Capture GPS'}
+                                  <div className="flex items-center justify-center gap-2 text-white/70 group-hover:text-lime group-disabled:text-white/50 transition">
+                                    {editTeeCpsLoading ? (
+                                      <Loader size={18} className="animate-spin" />
+                                    ) : (
+                                      <MapPin size={18} />
+                                    )}
+                                    <div className="text-left">
+                                      {editingHoleData.teeLocation ? (
+                                        <>
+                                          <div className="text-xs font-bold text-lime">✓ TEE LOCATION</div>
+                                          <div className="text-xs text-lime/80 mt-0.5">
+                                            {editingHoleData.teeLocation.lat.toFixed(4)}, {editingHoleData.teeLocation.lng.toFixed(4)}
+                                          </div>
+                                        </>
+                                      ) : editTeeCpsLoading ? (
+                                        <>
+                                          <div className="text-xs font-bold uppercase tracking-wider">Acquiring...</div>
+                                          <div className="text-xs text-white/50">GPS signal</div>
+                                        </>
+                                      ) : editTeeGpsError ? (
+                                        <>
+                                          <div className="text-xs font-bold uppercase tracking-wider text-red-400">Error</div>
+                                          <div className="text-xs text-red-400/70">{editTeeGpsError}</div>
+                                          <div className="flex gap-2 mt-0.5">
+                                            <button
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setEditTeeGpsError(null);
+                                              }}
+                                              className="text-xs text-red-400/60 hover:text-red-400/80"
+                                            >
+                                              Retry
+                                            </button>
+                                            <button
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setManualLocationOpen('editTee');
+                                              }}
+                                              className="text-xs text-lime/60 hover:text-lime/80"
+                                            >
+                                              Enter Manually
+                                            </button>
+                                          </div>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <div className="text-xs font-bold uppercase tracking-wider">Drop Tee</div>
+                                          <div className="text-xs text-white/50">Location</div>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
                                 </button>
-                              </div>
-                              {editTeeGpsError && (
-                                <div className="flex gap-2">
-                                  <p className="text-xs text-red-400 flex-1">{editTeeGpsError}</p>
+
+                                <div className="relative">
                                   <button
-                                    onClick={() => setManualLocationOpen('editTee')}
-                                    className="text-xs text-lime/60 hover:text-lime/80 whitespace-nowrap"
+                                    onClick={() => setEditTeePhotoMenuOpen(!editTeePhotoMenuOpen)}
+                                    disabled={editTeePhotoLoading}
+                                    className={`group w-full border rounded-lg overflow-hidden transition ${
+                                      editingHoleData.teeImage
+                                        ? 'border-lime/50 hover:border-lime/70'
+                                        : 'from-white/10 to-white/5 border-white/20 hover:border-lime/50 disabled:border-white/10 disabled:opacity-60'
+                                    }`}
                                   >
-                                    Enter Manually
+                                    {editingHoleData.teeImage ? (
+                                      <div className="relative h-24 bg-black/50">
+                                        <img
+                                          src={editingHoleData.teeImage.startsWith('data:') ? editingHoleData.teeImage : getImagePath(editingHoleData.teeImage)}
+                                          alt="Tee"
+                                          className="w-full h-full object-cover"
+                                        />
+                                        <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition flex items-center justify-center">
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setEditingHoleData({ ...editingHoleData, teeImage: null });
+                                            }}
+                                            className="text-lime text-sm font-bold hover:text-lime/70"
+                                          >
+                                            Change
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="p-3 bg-gradient-to-b from-white/10 to-white/5">
+                                        <div className="flex items-center justify-center gap-2 text-white/70 group-hover:text-lime group-disabled:text-white/50 transition">
+                                          {editTeePhotoLoading ? (
+                                            <Loader size={18} className="animate-spin" />
+                                          ) : (
+                                            <ImageIcon size={18} />
+                                          )}
+                                          <div className="text-left">
+                                            {editTeePhotoLoading ? (
+                                              <>
+                                                <div className="text-xs font-bold uppercase tracking-wider">Uploading...</div>
+                                                <div className="text-xs text-white/50">Photo</div>
+                                              </>
+                                            ) : editTeePhotoError ? (
+                                              <>
+                                                <div className="text-xs font-bold uppercase tracking-wider text-red-400">Error</div>
+                                                <button
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setEditTeePhotoError(null);
+                                                  }}
+                                                  className="text-xs text-red-400/60 hover:text-red-400/80 mt-0.5"
+                                                >
+                                                  Retry
+                                                </button>
+                                              </>
+                                            ) : (
+                                              <>
+                                                <div className="text-xs font-bold uppercase tracking-wider">Add Photo</div>
+                                                <div className="text-xs text-white/50">Tee</div>
+                                              </>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
                                   </button>
+
+                                  {/* Photo Menu */}
+                                  <AnimatePresence>
+                                    {editTeePhotoMenuOpen && (
+                                      <motion.div
+                                        initial={{ opacity: 0, y: -10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0, y: -10 }}
+                                        className="absolute bottom-full left-0 right-0 mb-2 bg-navy border border-white/20 rounded-lg overflow-hidden shadow-lg z-50"
+                                      >
+                                        <button
+                                          onClick={() => {
+                                            setEditTeeCameraOpen(true);
+                                            setEditTeePhotoMenuOpen(false);
+                                          }}
+                                          className="w-full px-4 py-3 text-white hover:bg-white/10 transition text-sm font-semibold flex items-center gap-2 border-b border-white/10"
+                                        >
+                                          📷 Take Photo
+                                        </button>
+                                        <button
+                                          onClick={() => {
+                                            editTeeFileInputRef.current?.click();
+                                            setEditTeePhotoMenuOpen(false);
+                                          }}
+                                          className="w-full px-4 py-3 text-white hover:bg-white/10 transition text-sm font-semibold flex items-center gap-2"
+                                        >
+                                          📁 Choose File
+                                        </button>
+                                      </motion.div>
+                                    )}
+                                  </AnimatePresence>
+                                </div>
+
+                                <input
+                                  ref={editTeeCameraInputRef}
+                                  type="file"
+                                  accept="image/*"
+                                  capture="environment"
+                                  onChange={handleEditTeePhotoSelect}
+                                  className="hidden"
+                                />
+                                <input
+                                  ref={editTeeFileInputRef}
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={handleEditTeePhotoSelect}
+                                  className="hidden"
+                                />
+                              </div>
+
+                              {/* Tee Photo Error */}
+                              {editTeePhotoError && (
+                                <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                                  <AlertCircle size={16} className="text-red-400 flex-shrink-0 mt-0.5" />
+                                  <div className="text-sm text-red-400">{editTeePhotoError}</div>
                                 </div>
                               )}
-                              <textarea
-                                value={editingHoleData.teeDescription || ''}
-                                onChange={(e) => setEditingHoleData({ ...editingHoleData, teeDescription: e.target.value })}
-                                placeholder="Describe tee location..."
-                                rows={1}
-                                className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-xs"
-                              />
+
+                              {/* Tee Description */}
+                              <div>
+                                <label className="text-white/70 text-xs font-bold uppercase tracking-wider mb-2 block">Tee Description</label>
+                                <textarea
+                                  value={editingHoleData.teeDescription || ''}
+                                  onChange={(e) => setEditingHoleData({ ...editingHoleData, teeDescription: e.target.value })}
+                                  placeholder="Describe the tee location..."
+                                  rows={2}
+                                  className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-white/40 focus:outline-none focus:border-lime/50 focus:bg-white/15 transition text-sm resize-none"
+                                />
+                              </div>
                             </div>
 
-                            {/* Pin Location Edit */}
-                            <div className="bg-white/5 border border-white/10 rounded-lg p-3 space-y-2">
-                              <div className="text-xs font-bold uppercase tracking-wider text-white">Pin Location</div>
-                              <div className="flex gap-2">
+                            {/* PIN SECTION */}
+                            <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-3">
+                              <h4 className="text-white/80 text-xs font-bold uppercase tracking-wider">Pin Location</h4>
+                              
+                              {/* Drop Pin & Add Photo Pin */}
+                              <div className="grid grid-cols-2 gap-3">
                                 <button
                                   onClick={() => {
                                     if (editingHoleData.pinLocation) {
@@ -1015,49 +1310,225 @@ export default function CourseBuilder({
                                     }
                                   }}
                                   disabled={editPinGpsLoading}
-                                  className="flex-1 text-left text-xs font-bold py-2 px-3 bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg text-lime"
+                                  className={`group bg-gradient-to-b border rounded-lg p-3 transition ${
+                                    editingHoleData.pinLocation
+                                      ? 'from-lime/20 to-lime/10 border-lime/50 hover:border-lime/70'
+                                      : 'from-white/10 to-white/5 border-white/20 hover:border-lime/50 disabled:border-white/10 disabled:opacity-60 disabled:hover:bg-white/5'
+                                  } hover:bg-white/15`}
                                 >
-                                  {editPinGpsLoading ? 'Acquiring GPS...' : editingHoleData.pinLocation ? 'View' : 'Capture GPS'}
+                                  <div className="flex items-center justify-center gap-2 text-white/70 group-hover:text-lime group-disabled:text-white/50 transition">
+                                    {editPinGpsLoading ? (
+                                      <Loader size={18} className="animate-spin" />
+                                    ) : (
+                                      <MapPin size={18} />
+                                    )}
+                                    <div className="text-left">
+                                      {editingHoleData.pinLocation ? (
+                                        <>
+                                          <div className="text-xs font-bold text-lime">✓ PIN LOCATION</div>
+                                          <div className="text-xs text-lime/80 mt-0.5">
+                                            {editingHoleData.pinLocation.lat.toFixed(4)}, {editingHoleData.pinLocation.lng.toFixed(4)}
+                                          </div>
+                                        </>
+                                      ) : editPinGpsLoading ? (
+                                        <>
+                                          <div className="text-xs font-bold uppercase tracking-wider">Acquiring...</div>
+                                          <div className="text-xs text-white/50">GPS signal</div>
+                                        </>
+                                      ) : editPinGpsError ? (
+                                        <>
+                                          <div className="text-xs font-bold uppercase tracking-wider text-red-400">Error</div>
+                                          <div className="text-xs text-red-400/70">{editPinGpsError}</div>
+                                          <div className="flex gap-2 mt-0.5">
+                                            <button
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setPinGpsError(null);
+                                              }}
+                                              className="text-xs text-red-400/60 hover:text-red-400/80"
+                                            >
+                                              Retry
+                                            </button>
+                                            <button
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setManualLocationOpen('editPin');
+                                              }}
+                                              className="text-xs text-lime/60 hover:text-lime/80"
+                                            >
+                                              Enter Manually
+                                            </button>
+                                          </div>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <div className="text-xs font-bold uppercase tracking-wider">Drop Pin</div>
+                                          <div className="text-xs text-white/50">Location</div>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
                                 </button>
-                              </div>
-                              {editPinGpsError && (
-                                <div className="flex gap-2">
-                                  <p className="text-xs text-red-400 flex-1">{editPinGpsError}</p>
+
+                                <div className="relative">
                                   <button
-                                    onClick={() => setManualLocationOpen('editPin')}
-                                    className="text-xs text-lime/60 hover:text-lime/80 whitespace-nowrap"
+                                    onClick={() => setEditPinPhotoMenuOpen(!editPinPhotoMenuOpen)}
+                                    disabled={editPinPhotoLoading}
+                                    className={`group w-full border rounded-lg overflow-hidden transition ${
+                                      editingHoleData.pinImage
+                                        ? 'border-lime/50 hover:border-lime/70'
+                                        : 'from-white/10 to-white/5 border-white/20 hover:border-lime/50 disabled:border-white/10 disabled:opacity-60'
+                                    }`}
                                   >
-                                    Enter Manually
+                                    {editingHoleData.pinImage ? (
+                                      <div className="relative h-24 bg-black/50">
+                                        <img
+                                          src={editingHoleData.pinImage.startsWith('data:') ? editingHoleData.pinImage : getImagePath(editingHoleData.pinImage)}
+                                          alt="Pin"
+                                          className="w-full h-full object-cover"
+                                        />
+                                        <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition flex items-center justify-center">
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setEditingHoleData({ ...editingHoleData, pinImage: null });
+                                            }}
+                                            className="text-lime text-sm font-bold hover:text-lime/70"
+                                          >
+                                            Change
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="p-3 bg-gradient-to-b from-white/10 to-white/5">
+                                        <div className="flex items-center justify-center gap-2 text-white/70 group-hover:text-lime group-disabled:text-white/50 transition">
+                                          {editPinPhotoLoading ? (
+                                            <Loader size={18} className="animate-spin" />
+                                          ) : (
+                                            <ImageIcon size={18} />
+                                          )}
+                                          <div className="text-left">
+                                            {editPinPhotoLoading ? (
+                                              <>
+                                                <div className="text-xs font-bold uppercase tracking-wider">Uploading...</div>
+                                                <div className="text-xs text-white/50">Photo</div>
+                                              </>
+                                            ) : editPinPhotoError ? (
+                                              <>
+                                                <div className="text-xs font-bold uppercase tracking-wider text-red-400">Error</div>
+                                                <button
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setEditPinPhotoError(null);
+                                                  }}
+                                                  className="text-xs text-red-400/60 hover:text-red-400/80 mt-0.5"
+                                                >
+                                                  Retry
+                                                </button>
+                                              </>
+                                            ) : (
+                                              <>
+                                                <div className="text-xs font-bold uppercase tracking-wider">Add Photo</div>
+                                                <div className="text-xs text-white/50">Pin</div>
+                                              </>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
                                   </button>
+
+                                  {/* Photo Menu */}
+                                  <AnimatePresence>
+                                    {editPinPhotoMenuOpen && (
+                                      <motion.div
+                                        initial={{ opacity: 0, y: -10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0, y: -10 }}
+                                        className="absolute bottom-full left-0 right-0 mb-2 bg-navy border border-white/20 rounded-lg overflow-hidden shadow-lg z-50"
+                                      >
+                                        <button
+                                          onClick={() => {
+                                            setEditPinCameraOpen(true);
+                                            setEditPinPhotoMenuOpen(false);
+                                          }}
+                                          className="w-full px-4 py-3 text-white hover:bg-white/10 transition text-sm font-semibold flex items-center gap-2 border-b border-white/10"
+                                        >
+                                          📷 Take Photo
+                                        </button>
+                                        <button
+                                          onClick={() => {
+                                            editPinFileInputRef.current?.click();
+                                            setEditPinPhotoMenuOpen(false);
+                                          }}
+                                          className="w-full px-4 py-3 text-white hover:bg-white/10 transition text-sm font-semibold flex items-center gap-2"
+                                        >
+                                          📁 Choose File
+                                        </button>
+                                      </motion.div>
+                                    )}
+                                  </AnimatePresence>
+                                </div>
+
+                                <input
+                                  ref={editPinCameraInputRef}
+                                  type="file"
+                                  accept="image/*"
+                                  capture="environment"
+                                  onChange={handleEditPinPhotoSelect}
+                                  className="hidden"
+                                />
+                                <input
+                                  ref={editPinFileInputRef}
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={handleEditPinPhotoSelect}
+                                  className="hidden"
+                                />
+                              </div>
+
+                              {/* Pin Photo Error */}
+                              {editPinPhotoError && (
+                                <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                                  <AlertCircle size={16} className="text-red-400 flex-shrink-0 mt-0.5" />
+                                  <div className="text-sm text-red-400">{editPinPhotoError}</div>
                                 </div>
                               )}
-                              <textarea
-                                value={editingHoleData.pinDescription || ''}
-                                onChange={(e) => setEditingHoleData({ ...editingHoleData, pinDescription: e.target.value })}
-                                placeholder="Describe pin location..."
-                                rows={1}
-                                className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-xs"
-                              />
+
+                              {/* Pin Description */}
+                              <div>
+                                <label className="text-white/70 text-xs font-bold uppercase tracking-wider mb-2 block">Pin Description</label>
+                                <textarea
+                                  value={editingHoleData.pinDescription || ''}
+                                  onChange={(e) => setEditingHoleData({ ...editingHoleData, pinDescription: e.target.value })}
+                                  placeholder="Describe the pin location..."
+                                  rows={2}
+                                  className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-white/40 focus:outline-none focus:border-lime/50 focus:bg-white/15 transition text-sm resize-none"
+                                />
+                              </div>
                             </div>
 
                             {/* Tips & Hazard */}
-                            <div className="space-y-2">
-                              <label className="text-white/70 text-xs font-bold uppercase">Tips</label>
-                              <textarea
-                                value={editingHoleData.tip || ''}
-                                onChange={(e) => setEditingHoleData({ ...editingHoleData, tip: e.target.value })}
-                                rows={1}
-                                className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-xs"
-                              />
+                            <div className="space-y-3">
+                              <div>
+                                <label className="text-white/70 text-xs font-bold uppercase tracking-wider mb-2 block">Tips</label>
+                                <textarea
+                                  value={editingHoleData.tip || ''}
+                                  onChange={(e) => setEditingHoleData({ ...editingHoleData, tip: e.target.value })}
+                                  placeholder="Add tips for playing this hole..."
+                                  rows={2}
+                                  className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-white/40 focus:outline-none focus:border-lime/50 focus:bg-white/15 transition text-sm resize-none"
+                                />
+                              </div>
                               <div className="flex items-center gap-2">
                                 <input
                                   type="checkbox"
-                                  id={`hazard-${hole.id}`}
-                                  checked={editingHoleData.hazard || false}
+                                  id={`hazard-edit-${hole.id}`}
+                                  checked={editingHoleData.hazard === true}
                                   onChange={(e) => setEditingHoleData({ ...editingHoleData, hazard: e.target.checked })}
                                   className="w-4 h-4 accent-lime"
                                 />
-                                <label htmlFor={`hazard-${hole.id}`} className="text-white/80 text-xs font-bold">Mark as Hazard</label>
+                                <label htmlFor={`hazard-edit-${hole.id}`} className="text-white/80 text-xs font-bold uppercase">Mark as Hazard</label>
                               </div>
                             </div>
 
@@ -1065,41 +1536,18 @@ export default function CourseBuilder({
                             <div className="flex gap-2">
                               <button
                                 onClick={saveHoleEdit}
-                                className="flex-1 px-3 py-2 bg-lime text-dark font-bold text-xs rounded-lg hover:bg-lime/90"
+                                className="flex-1 px-3 py-2 bg-lime text-dark font-bold text-xs rounded-lg hover:bg-lime/90 transition"
                               >
                                 Save
                               </button>
                               <button
                                 onClick={cancelHoleEdit}
-                                className="flex-1 px-3 py-2 bg-white/10 text-white font-bold text-xs rounded-lg hover:bg-white/20"
+                                className="flex-1 px-3 py-2 bg-white/10 text-white font-bold text-xs rounded-lg hover:bg-white/20 transition"
                               >
                                 Cancel
                               </button>
                             </div>
                           </div>
-                        ) : (
-                          // View-only mode
-                          <>
-                            {hole.teeDescription && (
-                              <div>
-                                <p className="text-white/60 text-xs uppercase font-bold mb-1">Tee Location</p>
-                                <p className="text-white/80">{hole.teeDescription}</p>
-                              </div>
-                            )}
-                            {hole.pinDescription && (
-                              <div>
-                                <p className="text-white/60 text-xs uppercase font-bold mb-1">Pin Location</p>
-                                <p className="text-white/80">{hole.pinDescription}</p>
-                              </div>
-                            )}
-                            {hole.tip && (
-                              <div>
-                                <p className="text-white/60 text-xs uppercase font-bold mb-1">Tips</p>
-                                <p className="text-white/80">{hole.tip}</p>
-                              </div>
-                            )}
-                          </>
-                        )}
                       </motion.div>
                     )}
                   </AnimatePresence>
@@ -1664,7 +2112,7 @@ export default function CourseBuilder({
               transition={{ delay: 0.3 }}
               onClick={publishCourse}
               disabled={isPublishing}
-              className={`flex-1 py-4 rounded-xl font-black text-lg shadow-xl uppercase tracking-wider transition ${
+              className={`flex-1 py-4 rounded-xl font-black text-sm shadow-xl uppercase tracking-wider transition ${
                 isPublishing
                   ? 'bg-lime/50 text-dark/50 shadow-lime/10 cursor-not-allowed'
                   : 'bg-gradient-to-r from-lime to-lime/80 text-dark hover:shadow-lime/40 shadow-lime/20 cursor-pointer'
@@ -1719,6 +2167,20 @@ export default function CourseBuilder({
             location="course"
             onCapture={handleCourseHeaderImageCapture}
             onCancel={() => setCourseHeaderImageCameraOpen(false)}
+          />
+        )}
+        {editTeeCameraOpen && (
+          <CameraCapture
+            location="tee"
+            onCapture={handleEditTeeCameraCapture}
+            onCancel={() => setEditTeeCameraOpen(false)}
+          />
+        )}
+        {editPinCameraOpen && (
+          <CameraCapture
+            location="pin"
+            onCapture={handleEditPinCameraCapture}
+            onCancel={() => setEditPinCameraOpen(false)}
           />
         )}
       </AnimatePresence>
