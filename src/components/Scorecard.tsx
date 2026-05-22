@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { Hole, Round } from '../types';
 import { Trophy, Clock } from 'lucide-react';
 
@@ -8,12 +9,24 @@ interface ScorecardProps {
 }
 
 export default function Scorecard({ round, holes, onFinishRound }: ScorecardProps) {
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom when all holes have scores
+  useEffect(() => {
+    const allHolesScored = holes.every(hole => round.scores[hole.number]);
+    if (allHolesScored && scrollContainerRef.current) {
+      setTimeout(() => {
+        scrollContainerRef.current?.scrollTo({ top: scrollContainerRef.current.scrollHeight, behavior: 'smooth' });
+      }, 100);
+    }
+  }, [round.scores, holes]);
+
   const totalPar = holes.reduce((acc, h) => acc + h.par, 0);
   const totalStrokes = Object.values(round.scores).reduce((acc, s) => acc + s.strokes, 0);
   const diff = totalStrokes - holes.filter(h => round.scores[h.number]).reduce((acc, h) => acc + h.par, 0);
 
   return (
-    <div className="p-4 bg-dark min-h-screen text-slate-100 pb-24">
+    <div ref={scrollContainerRef} className="p-4 bg-dark min-h-screen text-slate-100 pb-24 overflow-y-auto h-full">
       <div className="flex items-center justify-between mb-8">
         <h2 className="text-3xl font-[900] flex items-center gap-3 text-lime uppercase italic tracking-tighter">
           <Trophy size={28} />

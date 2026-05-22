@@ -33,6 +33,13 @@ export default function Home({ courses, onSelectCourse, onPlayNow, loading = fal
     }
   }, [currentUser]);
 
+  // Update selected course whenever carousel changes
+  useEffect(() => {
+    if (courses[currentIndex]) {
+      onSelectCourse(courses[currentIndex]);
+    }
+  }, [currentIndex, courses]);
+
   // Filter courses based on search
   const filteredCourses = courses.filter(course => {
     const name = 'courseName' in course ? course.courseName : course.name;

@@ -192,10 +192,19 @@ function AppContent() {
   // Load persistence (Firestore for logged-in users, localStorage for guests only)
   useEffect(() => {
     const loadData = async () => {
+      const ensureCourseName = (round: Round) => {
+        if (round.courseName) return round;
+        // Only use COURSES for lookups to avoid overwriting with stale availableCourses
+        const course = COURSES.find(c => c.id === round.courseId);
+        return { ...round, courseName: course?.name || 'Unknown Course' };
+      };
+
       if (currentUser?.uid) {
         try {
           const userRounds = await getUserRounds(currentUser.uid);
-          setHistory(userRounds);
+          // Migrate Firestore rounds to ensure they have courseName
+          const migratedRounds = userRounds.map(ensureCourseName);
+          setHistory(migratedRounds);
         } catch (error) {
           console.error('Failed to load rounds from Firestore:', error);
           // For logged-in users, do NOT fall back to localStorage
@@ -206,8 +215,15 @@ function AppContent() {
         const savedRound = localStorage.getItem('currentRound');
         const savedHistory = localStorage.getItem('roundHistory');
         
-        if (savedRound) setCurrentRound(JSON.parse(savedRound));
-        if (savedHistory) setHistory(JSON.parse(savedHistory));
+        if (savedRound) {
+          const round = ensureCourseName(JSON.parse(savedRound));
+          setCurrentRound(round);
+        }
+        if (savedHistory) {
+          const rounds = JSON.parse(savedHistory);
+          const migratedRounds = rounds.map(ensureCourseName);
+          setHistory(migratedRounds);
+        }
       }
     };
 
@@ -223,7 +239,12 @@ function AppContent() {
         // Save to Firestore for logged-in users
         if (currentRound) {
           try {
-            await saveRound(currentUser.uid, currentRound);
+            // Ensure courseName is always present before saving
+            const roundToSave = {
+              ...currentRound,
+              courseName: currentRound.courseName || availableCourses.find(c => c.id === currentRound.courseId)?.name || 'Unknown Course'
+            };
+            await saveRound(currentUser.uid, roundToSave);
           } catch (error) {
             console.error('Failed to save current round:', error);
           }
@@ -232,7 +253,11 @@ function AppContent() {
           // Save each round to Firestore
           for (const round of history) {
             try {
-              await saveRound(currentUser.uid, round);
+              const roundToSave = {
+                ...round,
+                courseName: round.courseName || availableCourses.find(c => c.id === round.courseId)?.name || 'Unknown Course'
+              };
+              await saveRound(currentUser.uid, roundToSave);
             } catch (error) {
               console.error('Failed to save round:', error);
             }
@@ -240,8 +265,18 @@ function AppContent() {
         }
       } else {
         // Save to localStorage for guests
-        if (currentRound) localStorage.setItem('currentRound', JSON.stringify(currentRound));
-        localStorage.setItem('roundHistory', JSON.stringify(history));
+        if (currentRound) {
+          const roundToSave = {
+            ...currentRound,
+            courseName: currentRound.courseName || availableCourses.find(c => c.id === currentRound.courseId)?.name || 'Unknown Course'
+          };
+          localStorage.setItem('currentRound', JSON.stringify(roundToSave));
+        }
+        const historyToSave = history.map(round => ({
+          ...round,
+          courseName: round.courseName || availableCourses.find(c => c.id === round.courseId)?.name || 'Unknown Course'
+        }));
+        localStorage.setItem('roundHistory', JSON.stringify(historyToSave));
       }
     };
 
@@ -249,14 +284,20 @@ function AppContent() {
   }, [currentRound, history, currentUser]);
 
   const startNewRound = () => {
+    console.log('🎯 Starting new round with selectedCourse:', selectedCourse);
+    const roundCourseName = selectedCourse?.name || 'Unknown Course';
+    const roundCourseId = selectedCourse?.id || COURSES[0].id;
+    
     const newRound: Round = {
       id: Date.now().toString(),
       date: new Date().toISOString(),
       scores: {},
       isCompleted: false,
-      courseId: selectedCourse.id,
-      courseName: 'name' in selectedCourse ? selectedCourse.name : selectedCourse.courseName
+      courseId: roundCourseId,
+      courseName: roundCourseName  // Explicitly capture at round creation
     };
+    
+    console.log('📝 Created new round:', { id: newRound.id, courseName: newRound.courseName, courseId: newRound.courseId });
     setCurrentRound(newRound);
     setCurrentHoleIdx(null);
     setActiveTab('map');
@@ -290,7 +331,17 @@ function AppContent() {
 
   const finishRound = () => {
     if (!currentRound) return;
-    const completedRound = { ...currentRound, isCompleted: true };
+    
+    // Ensure courseName is preserved when finishing
+    const completedRound = {
+      ...currentRound,
+      isCompleted: true,
+      // Safeguard: if courseName is missing, look it up
+      courseName: currentRound.courseName || availableCourses.find(c => c.id === currentRound.courseId)?.name || 'Unknown Course'
+    };
+    
+    console.log('✅ Finishing round:', { id: completedRound.id, courseName: completedRound.courseName, courseId: completedRound.courseId });
+    
     setHistory([completedRound, ...history]);
     setCurrentRound(null);
     setCurrentHoleIdx(null);
@@ -392,7 +443,7 @@ function AppContent() {
                 />
 
                 {currentHoleIdx !== null && (
-                  <div className="absolute bottom-32 sm:bottom-24 left-4 right-4 z-10">
+                  <div className="absolute left-4 right-4 z-20" style={{ bottom: '30px' }}>
                     <motion.div 
                       initial={{ y: 50, opacity: 0 }}
                       animate={{ y: 0, opacity: 1 }}
