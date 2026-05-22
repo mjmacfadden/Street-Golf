@@ -13,7 +13,7 @@ import { getPublishedCourses, getUserCourses, saveRound, getUserRounds, deleteRo
 import { captureGPSLocation } from './utils/geolocation';
 import { sortCoursesByDistance } from './utils/distance';
 import type { Course as FirestoreCourse } from './utils/courseService';
-import { STREET_GOLF_COURSE, COURSES, type Course } from './constants/course';
+import { COURSES, type Course } from './constants/course';
 import { Round, Score } from './types';
 import { getImagePath } from './utils/paths';
 
@@ -37,17 +37,19 @@ function AppContent() {
   });
   
   // Courses
-  const [availableCourses, setAvailableCourses] = useState<Course[]>(COURSES);
-  const [sortedCourses, setSortedCourses] = useState<Course[]>(COURSES);
+  const [availableCourses, setAvailableCourses] = useState<Course[]>([]);
+  const [sortedCourses, setSortedCourses] = useState<Course[]>([]);
   const [coursesLoading, setCoursesLoading] = useState(true);
   const [coursesError, setCoursesError] = useState<string | null>(null);
-  const [selectedCourse, setSelectedCourse] = useState<Course>(COURSES[0]);
+  const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
   
   // Geolocation
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
+  const [locationErrorCode, setLocationErrorCode] = useState<string | null>(null);
+  const [showLocationRetryPrompt, setShowLocationRetryPrompt] = useState(false);
 
-  const currentCourseHoles = selectedCourse.holes;
+  const currentCourseHoles = selectedCourse?.holes || [];
   const [currentHoleIdx, setCurrentHoleIdx] = useState<number | null>(null);
   const [isCardCollapsed, setIsCardCollapsed] = useState(false);
   const [currentRound, setCurrentRound] = useState<Round | null>(null);
@@ -188,13 +190,20 @@ function AppContent() {
       const captureLocation = async () => {
         try {
           setLocationError(null);
+          setLocationErrorCode(null);
           const location = await captureGPSLocation(10000, 10);
           console.log('✅ Fresh location captured:', location);
           setUserLocation(location);
+          setShowLocationRetryPrompt(false);
           // Cache the location for next load
           localStorage.setItem('userLocation', JSON.stringify(location));
         } catch (error: any) {
           console.warn('⚠️ Background location capture failed:', error);
+          setLocationErrorCode(error.code || 'UNKNOWN');
+          // Show retry prompt for permission denied
+          if (error.code === 'PERMISSION_DENIED') {
+            setShowLocationRetryPrompt(true);
+          }
           // Don't show error if we have cached location
           if (!localStorage.getItem('userLocation')) {
             setLocationError(error.message || 'Could not get your location');
@@ -213,14 +222,21 @@ function AppContent() {
       const captureLocation = async () => {
         try {
           setLocationError(null);
+          setLocationErrorCode(null);
           const location = await captureGPSLocation(10000, 10);
           console.log('✅ Location captured successfully:', location);
           setUserLocation(location);
+          setShowLocationRetryPrompt(false);
           // Cache the location for next load
           localStorage.setItem('userLocation', JSON.stringify(location));
         } catch (error: any) {
           console.warn('❌ Failed to capture location:', error);
+          setLocationErrorCode(error.code || 'UNKNOWN');
           setLocationError(error.message || 'Could not get your location');
+          // Show retry prompt for permission denied
+          if (error.code === 'PERMISSION_DENIED') {
+            setShowLocationRetryPrompt(true);
+          }
         }
       };
 
@@ -247,8 +263,12 @@ function AppContent() {
 
   // Ensure selectedCourse is valid when availableCourses changes
   useEffect(() => {
-    if (!availableCourses.find(c => c.id === selectedCourse.id)) {
-      setSelectedCourse(availableCourses[0] || COURSES[0]);
+    if (availableCourses.length > 0) {
+      if (!selectedCourse || !availableCourses.find(c => c.id === selectedCourse.id)) {
+        setSelectedCourse(availableCourses[0]);
+      }
+    } else {
+      setSelectedCourse(null);
     }
   }, [availableCourses]);
 
@@ -357,6 +377,11 @@ function AppContent() {
   }, [currentRound, history, currentUser]);
 
   const startNewRound = async () => {
+    if (!selectedCourse) {
+      console.warn('⚠️ Cannot start round: no course selected');
+      return;
+    }
+    
     console.log('🎯 Starting new round with selectedCourse:', selectedCourse);
     
     // Clean up any existing incomplete rounds first
@@ -370,8 +395,8 @@ function AppContent() {
       }
     }
     
-    const roundCourseName = selectedCourse?.name || 'Unknown Course';
-    const roundCourseId = selectedCourse?.id || COURSES[0].id;
+    const roundCourseName = selectedCourse.name || 'Unknown Course';
+    const roundCourseId = selectedCourse.id;
     
     const newRound: Round = {
       id: Date.now().toString(),
@@ -501,6 +526,29 @@ function AppContent() {
     setCurrentHoleIdx(null);
     setTempScore(4);
     console.log('✅ Round cancellation complete');
+  };
+
+  const handleRetryLocation = async () => {
+    console.log('🔄 Retrying location capture after permission denied...');
+    setShowLocationRetryPrompt(false);
+    setLocationError(null);
+    setLocationErrorCode(null);
+    
+    try {
+      const location = await captureGPSLocation(10000, 10);
+      console.log('✅ Location captured after retry:', location);
+      setUserLocation(location);
+      // Cache the location for next load
+      localStorage.setItem('userLocation', JSON.stringify(location));
+    } catch (error: any) {
+      console.warn('❌ Retry failed:', error);
+      setLocationErrorCode(error.code || 'UNKNOWN');
+      setLocationError(error.message || 'Could not get your location');
+      // Show retry prompt again if permission denied
+      if (error.code === 'PERMISSION_DENIED') {
+        setShowLocationRetryPrompt(true);
+      }
+    }
   };
 
   if (!hasValidKey) {
@@ -1148,6 +1196,53 @@ function AppContent() {
         {showAuthModal && (
           <AuthModal onClose={() => setShowAuthModal(false)} />
         )}
+
+        {/* Location Permission Retry Modal */}
+        <AnimatePresence>
+          {showLocationRetryPrompt && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowLocationRetryPrompt(false)}
+              className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+            >
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                onClick={(e) => e.stopPropagation()}
+                className="bg-dark rounded-2xl p-8 max-w-sm w-full mx-4 border border-white/10"
+              >
+                <div className="text-center">
+                  <div className="inline-block p-3 bg-red-500/20 rounded-full mb-4">
+                    <svg className="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
+                  <h2 className="text-2xl font-black text-white mb-2">Location Permission Required</h2>
+                  <p className="text-white/60 mb-6">
+                    Street Golf needs your location to sort courses by distance and show accurate hole distances. Please allow access to continue.
+                  </p>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setShowLocationRetryPrompt(false)}
+                      className="flex-1 px-4 py-2 bg-white/10 rounded-lg text-white font-bold hover:bg-white/20 transition-colors"
+                    >
+                      Dismiss
+                    </button>
+                    <button
+                      onClick={handleRetryLocation}
+                      className="flex-1 px-4 py-2 bg-lime text-dark rounded-lg font-bold hover:bg-lime/90 transition-colors"
+                    >
+                      Try Again
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </APIProvider>
   );

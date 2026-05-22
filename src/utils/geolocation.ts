@@ -112,8 +112,8 @@ export const captureGPSLocation = (
       },
       {
         enableHighAccuracy: true,
-        timeout: timeout,
-        maximumAge: 0,
+        timeout: finalTimeout, // Use computed timeout for mobile (60s) vs desktop (5s)
+        maximumAge: 0, // Always get fresh position, never use cached
       }
     );
   });
@@ -238,8 +238,8 @@ export const captureGPSLocationWithFeedback = (options: {
       },
       {
         enableHighAccuracy: true,
-        timeout: timeout,
-        maximumAge: 0,
+        timeout: timeout, // Timeout already set at function level
+        maximumAge: 0, // Always get fresh position, never use cached
       }
     );
   });

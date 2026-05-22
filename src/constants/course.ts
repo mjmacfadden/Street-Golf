@@ -196,17 +196,4 @@ export const GLENBROOK_OPEN: Hole[] = [
   }
 ];
 
-export const COURSES: Course[] = [
-  {
-    id: 'southbridge',
-    name: 'The Southbridge Open',
-    location: 'Southbridge Lane, Glendale',
-    holes: STREET_GOLF_COURSE
-  },
-  {
-    id: 'glenbrook',
-    name: 'The Glenbrook Open',
-    location: '4000 W Lake Ave, Glenview, IL 60026',
-    holes: GLENBROOK_OPEN
-  }
-];
+export const COURSES: Course[] = [];

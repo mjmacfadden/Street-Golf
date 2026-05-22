@@ -667,3 +667,41 @@ export const deleteCourseAdmin = async (courseId: string): Promise<void> => {
     throw error;
   }
 };
+
+/**
+ * ADMIN: Migrate hardcoded courses (Southbridge, Glenbrook) to Firebase
+ * under the admin account
+ */
+export const migrateCourseToFirebase = async (
+  adminUid: string,
+  courseId: string,
+  courseName: string,
+  location: string,
+  holes: any[]
+): Promise<void> => {
+  try {
+    const courseData = {
+      id: courseId,
+      userId: adminUid,
+      courseName: courseName,
+      creatorName: 'Admin',
+      location: location,
+      holes: holes,
+      status: 'published' as const,
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+      publishedAt: Timestamp.now(),
+    };
+
+    // Save to public courses collection
+    await setDoc(doc(db, 'courses', courseId), courseData);
+    
+    // Save to admin's user courses
+    await setDoc(doc(db, 'users', adminUid, 'courses', courseId), courseData);
+    
+    console.log(`✅ Migrated course "${courseName}" to Firebase`);
+  } catch (error) {
+    console.error(`Failed to migrate course "${courseName}":`, error);
+    throw error;
+  }
+};

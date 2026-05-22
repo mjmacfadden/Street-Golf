@@ -25,6 +25,8 @@ export default function Home({ courses, onSelectCourse, onPlayNow, loading = fal
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [showSearchResults, setShowSearchResults] = useState(false);
+  const [showAutocompleteSuggestions, setShowAutocompleteSuggestions] = useState(false);
+  const [highlightedSuggestionIndex, setHighlightedSuggestionIndex] = useState(-1);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [favLoading, setFavLoading] = useState(false);
   const [showFavoriteLoginModal, setShowFavoriteLoginModal] = useState(false);
@@ -51,11 +53,26 @@ export default function Home({ courses, onSelectCourse, onPlayNow, loading = fal
     }
   }, [currentIndex, courses]);
 
-  // Filter courses based on search
+  // Close autocomplete suggestions when search closes
+  useEffect(() => {
+    if (!searchOpen) {
+      setShowAutocompleteSuggestions(false);
+      setHighlightedSuggestionIndex(-1);
+    }
+  }, [searchOpen]);
+
+  // Filter courses based on search and generate autocomplete suggestions
   const filteredCourses = courses.filter(course => {
     const name = 'courseName' in course ? course.courseName : course.name;
     return name.toLowerCase().includes(searchTerm.toLowerCase());
   });
+
+  // Generate autocomplete suggestions (limit to 5)
+  const autocompleteSuggestions = searchTerm.trim() 
+    ? filteredCourses.slice(0, 5).map(course => 
+        'courseName' in course ? course.courseName : course.name
+      )
+    : [];
 
   const displayCourses = courses;
   const currentCourse = displayCourses[currentIndex];
@@ -317,26 +334,97 @@ export default function Home({ courses, onSelectCourse, onPlayNow, loading = fal
                 className="flex items-center gap-2 flex-1"
               >
                 {searchOpen && (
-                  <input
-                    autoFocus
-                    type="text"
-                    value={searchTerm}
-                    onChange={(e) => {
-                      setSearchTerm(e.target.value);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        setShowSearchResults(true);
-                        setSearchOpen(false);
-                      }
-                      if (e.key === 'Escape') {
-                        setSearchOpen(false);
-                        setSearchTerm('');
-                      }
-                    }}
-                    placeholder="Search courses..."
-                    className="flex-1 px-4 py-2 bg-black/40 border border-white/30 rounded-lg text-white placeholder-white/60 focus:outline-none focus:border-lime/50 focus:bg-black/50"
-                  />
+                  <div className="flex-1 relative">
+                    <input
+                      autoFocus
+                      type="text"
+                      value={searchTerm}
+                      onChange={(e) => {
+                        setSearchTerm(e.target.value);
+                        setHighlightedSuggestionIndex(-1);
+                        setShowAutocompleteSuggestions(true);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          if (highlightedSuggestionIndex >= 0 && autocompleteSuggestions[highlightedSuggestionIndex]) {
+                            // Select highlighted suggestion
+                            const selectedCourseName = autocompleteSuggestions[highlightedSuggestionIndex];
+                            const selectedCourse = courses.find(c => {
+                              const name = 'courseName' in c ? c.courseName : c.name;
+                              return name === selectedCourseName;
+                            });
+                            if (selectedCourse) {
+                              setCurrentIndex(courses.indexOf(selectedCourse));
+                              setShowAutocompleteSuggestions(false);
+                              setSearchOpen(false);
+                              setSearchTerm('');
+                              onSelectCourse(selectedCourse);
+                            }
+                          } else {
+                            // Show all search results
+                            setShowSearchResults(true);
+                            setShowAutocompleteSuggestions(false);
+                            setSearchOpen(false);
+                          }
+                        } else if (e.key === 'ArrowDown') {
+                          e.preventDefault();
+                          setHighlightedSuggestionIndex(prev => 
+                            prev < autocompleteSuggestions.length - 1 ? prev + 1 : prev
+                          );
+                        } else if (e.key === 'ArrowUp') {
+                          e.preventDefault();
+                          setHighlightedSuggestionIndex(prev => prev > 0 ? prev - 1 : -1);
+                        } else if (e.key === 'Escape') {
+                          setSearchOpen(false);
+                          setSearchTerm('');
+                          setShowAutocompleteSuggestions(false);
+                          setHighlightedSuggestionIndex(-1);
+                        }
+                      }}
+                      placeholder="Search courses..."
+                      className="w-full px-4 py-2 bg-black/40 border border-white/30 rounded-lg text-white placeholder-white/60 focus:outline-none focus:border-lime/50 focus:bg-black/50"
+                    />
+
+                    {/* Autocomplete Dropdown */}
+                    <AnimatePresence>
+                      {showAutocompleteSuggestions && autocompleteSuggestions.length > 0 && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -5 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -5 }}
+                          className="absolute top-full left-0 right-0 mt-1 bg-slate-900 border border-white/20 rounded-lg shadow-lg z-50 overflow-hidden"
+                        >
+                          {autocompleteSuggestions.map((suggestion, idx) => (
+                            <button
+                              key={idx}
+                              onClick={() => {
+                                const selectedCourse = courses.find(c => {
+                                  const name = 'courseName' in c ? c.courseName : c.name;
+                                  return name === suggestion;
+                                });
+                                if (selectedCourse) {
+                                  setCurrentIndex(courses.indexOf(selectedCourse));
+                                  setShowAutocompleteSuggestions(false);
+                                  setSearchOpen(false);
+                                  setSearchTerm('');
+                                  onSelectCourse(selectedCourse);
+                                  setHighlightedSuggestionIndex(-1);
+                                }
+                              }}
+                              className={`w-full text-left px-4 py-2 transition flex items-center gap-2 ${
+                                highlightedSuggestionIndex === idx
+                                  ? 'bg-lime/20 text-lime'
+                                  : 'text-white/70 hover:bg-white/10 hover:text-white'
+                              }`}
+                            >
+                              <Search size={14} className="opacity-60" />
+                              <span className="text-sm">{suggestion}</span>
+                            </button>
+                          ))}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
                 )}
               </motion.div>
 
