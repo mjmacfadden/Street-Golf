@@ -22,6 +22,7 @@ export const captureGPSLocation = (
 ): Promise<GPSLocation> => {
   // Detect if likely mobile or desktop - mobile user agents typically have "Mobile" in them
   const isMobile = /Mobile|Android|iPhone|iPad|iPod/.test(navigator.userAgent);
+  const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
   const defaultTimeout = isMobile ? 60000 : 5000; // 5s on desktop (WiFi-based), 60s on mobile (GPS)
   const finalTimeout = timeout ?? defaultTimeout;
 
@@ -38,6 +39,7 @@ export const captureGPSLocation = (
     let timeoutId: NodeJS.Timeout;
     let watchId: number | null = null;
     let hasReceivedCallback = false;
+    let errorHandled = false; // Track if we've already rejected due to error
 
     const cleanup = () => {
       if (timeoutId) clearTimeout(timeoutId);
@@ -48,15 +50,18 @@ export const captureGPSLocation = (
       cleanup();
       if (bestReading) {
         // If we have at least one reading, use it even if accuracy isn't perfect
-        resolve(bestReading);
+        if (!errorHandled) resolve(bestReading);
       } else {
         // More specific error message for desktop
-        reject({
-          code: 'TIMEOUT',
-          message: !isMobile 
-            ? 'Desktop GPS not available. Mobile devices have better GPS accuracy. For testing, use browser DevTools to simulate location.' 
-            : 'GPS acquisition timed out. Please try again in an open area.',
-        } as GeolocationError);
+        if (!errorHandled) {
+          errorHandled = true;
+          reject({
+            code: 'TIMEOUT',
+            message: !isMobile 
+              ? 'Desktop GPS not available. Mobile devices have better GPS accuracy. For testing, use browser DevTools to simulate location.' 
+              : 'GPS acquisition timed out. Please try again in an open area.',
+          } as GeolocationError);
+        }
       }
     }, finalTimeout);
 
@@ -78,12 +83,25 @@ export const captureGPSLocation = (
           // If we've achieved good accuracy, resolve immediately
           if (newReading.accuracy <= targetAccuracy) {
             cleanup();
-            resolve(bestReading);
+            if (!errorHandled) {
+              errorHandled = true;
+              resolve(bestReading);
+            }
           }
         }
       },
       (error) => {
+        // On iOS, sometimes the error callback is called even before the success callback
+        // Don't reject immediately if we haven't received any callback yet
+        if (isIOS && !hasReceivedCallback) {
+          return; // Wait for potential success callback
+        }
+
         cleanup();
+        
+        if (errorHandled) return; // Already handled this error
+        errorHandled = true;
+
         let code: GeolocationError['code'] = 'UNKNOWN';
         let message = 'Unknown error acquiring GPS location';
 
@@ -154,6 +172,7 @@ export const captureGPSLocationWithFeedback = (options: {
   const timeout = options.timeout ?? 60000;
   const targetAccuracy = options.targetAccuracy ?? 10;
   const onAccuracyUpdate = options.onAccuracyUpdate;
+  const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
 
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
@@ -168,6 +187,8 @@ export const captureGPSLocationWithFeedback = (options: {
     let attemptCount = 0;
     let timeoutId: NodeJS.Timeout;
     let watchId: number | null = null;
+    let hasReceivedCallback = false;
+    let errorHandled = false;
 
     const cleanup = () => {
       if (timeoutId) clearTimeout(timeoutId);
@@ -177,17 +198,21 @@ export const captureGPSLocationWithFeedback = (options: {
     timeoutId = setTimeout(() => {
       cleanup();
       if (bestReading) {
-        resolve(bestReading);
+        if (!errorHandled) resolve(bestReading);
       } else {
-        reject({
-          code: 'TIMEOUT',
-          message: 'GPS acquisition timed out. Please try again in an open area.',
-        } as GeolocationError);
+        if (!errorHandled) {
+          errorHandled = true;
+          reject({
+            code: 'TIMEOUT',
+            message: 'GPS acquisition timed out. Please try again in an open area.',
+          } as GeolocationError);
+        }
       }
     }, timeout);
 
     watchId = navigator.geolocation.watchPosition(
       (position) => {
+        hasReceivedCallback = true;
         attemptCount++;
         const newReading: GPSLocation = {
           lat: position.coords.latitude,
@@ -204,12 +229,25 @@ export const captureGPSLocationWithFeedback = (options: {
 
           if (newReading.accuracy <= targetAccuracy) {
             cleanup();
-            resolve(bestReading);
+            if (!errorHandled) {
+              errorHandled = true;
+              resolve(bestReading);
+            }
           }
         }
       },
       (error) => {
+        // On iOS, sometimes the error callback is called even before the success callback
+        // Don't reject immediately if we haven't received any callback yet
+        if (isIOS && !hasReceivedCallback) {
+          return; // Wait for potential success callback
+        }
+
         cleanup();
+        
+        if (errorHandled) return; // Already handled this error
+        errorHandled = true;
+
         let code: GeolocationError['code'] = 'UNKNOWN';
         let message = 'Unknown error acquiring GPS location';
 

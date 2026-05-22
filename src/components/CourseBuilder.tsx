@@ -878,7 +878,7 @@ export default function CourseBuilder({
                       : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'
                   }`}
                 >
-                  🌍 Public (In Index)
+                  🌍 Public
                 </button>
                 <button
                   onClick={() => setCourseVisibility('private')}
@@ -888,7 +888,7 @@ export default function CourseBuilder({
                       : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'
                   }`}
                 >
-                  🔒 Private (URL Only)
+                  🔒 Private
                 </button>
               </div>
               <p className="text-white/50 text-xs mt-1">
@@ -1130,7 +1130,7 @@ export default function CourseBuilder({
                                             <button
                                               onClick={(e) => {
                                                 e.stopPropagation();
-                                                setEditTeeGpsError(null);
+                                                captureEditTeeLoc();
                                               }}
                                               className="text-xs text-red-400/60 hover:text-red-400/80"
                                             >
@@ -1343,7 +1343,7 @@ export default function CourseBuilder({
                                             <button
                                               onClick={(e) => {
                                                 e.stopPropagation();
-                                                setPinGpsError(null);
+                                                captureEditPinLoc();
                                               }}
                                               className="text-xs text-red-400/60 hover:text-red-400/80"
                                             >
@@ -1644,7 +1644,7 @@ export default function CourseBuilder({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setTeeGpsError(null);
+                                captureTeeLocation();
                               }}
                               className="text-xs text-red-400/60 hover:text-red-400/80"
                             >
@@ -1857,7 +1857,7 @@ export default function CourseBuilder({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setPinGpsError(null);
+                                capturePinLocation();
                               }}
                               className="text-xs text-red-400/60 hover:text-red-400/80"
                             >

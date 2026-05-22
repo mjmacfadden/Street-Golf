@@ -294,6 +294,47 @@ function AppContent() {
     }
   }, [availableCourses]);
 
+  // Load shared course from URL parameter and switch to map view
+  useEffect(() => {
+    const loadSharedCourse = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const sharedCourseId = params.get('c');
+      
+      if (!sharedCourseId) return;
+      
+      // First check if it's already in availableCourses
+      let sharedCourse = availableCourses.find(c => c.id === sharedCourseId);
+      
+      // If not found, try to load it directly
+      if (!sharedCourse && availableCourses.length > 0) {
+        try {
+          console.log('📍 Shared course not in available courses, attempting to load:', sharedCourseId);
+          const firestoreCourse = await getCourseById(sharedCourseId);
+          if (firestoreCourse) {
+            sharedCourse = convertFirestoreCourse(firestoreCourse);
+            console.log('📍 Loaded shared course directly:', sharedCourse.name);
+          }
+        } catch (err) {
+          console.warn('❌ Failed to load shared course:', err);
+          return;
+        }
+      }
+      
+      if (sharedCourse) {
+        console.log('📍 Shared course found, switching to map view:', sharedCourse.name);
+        setSelectedCourse(sharedCourse);
+        setActiveTab('map');
+      } else {
+        console.warn('⚠️ Shared course not found:', sharedCourseId);
+      }
+    };
+    
+    // Only run after courses have loaded
+    if (availableCourses.length > 0 && !coursesLoading) {
+      loadSharedCourse();
+    }
+  }, [availableCourses, coursesLoading]);
+
   // Load persistence (Firestore for logged-in users, localStorage for guests only)
   useEffect(() => {
     const loadData = async () => {

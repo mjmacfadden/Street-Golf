@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Edit, Trash2, LogOut, AlertTriangle, Loader, Heart } from 'lucide-react';
+import { Edit, Trash2, LogOut, AlertTriangle, Loader, Heart, Copy, Check } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { AuthModal } from './AuthModal';
 import { AdminPanel } from './AdminPanel';
@@ -27,6 +27,7 @@ export const Profile: React.FC<ProfileProps> = ({ onEditCourse, onLogout, onDele
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [copiedCourseId, setCopiedCourseId] = useState<string | null>(null);
 
   // Fetch user's courses and favorites
   useEffect(() => {
@@ -96,6 +97,16 @@ export const Profile: React.FC<ProfileProps> = ({ onEditCourse, onLogout, onDele
       console.error('Failed to remove favorite:', err);
       setError('Failed to remove favorite');
     }
+  };
+
+  const handleCopyCourseUrl = (courseId: string) => {
+    const url = `${window.location.origin}?c=${courseId}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedCourseId(courseId);
+      setTimeout(() => setCopiedCourseId(null), 2000);
+    }).catch(() => {
+      setError('Failed to copy URL');
+    });
   };
 
   if (!currentUser) {
@@ -210,6 +221,22 @@ export const Profile: React.FC<ProfileProps> = ({ onEditCourse, onLogout, onDele
 
                     {/* Action Buttons */}
                     <div className="flex gap-2 shrink-0">
+                      {course.status === 'published' && course.visibility === 'private' && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleCopyCourseUrl(course.id);
+                          }}
+                          className={`p-2 rounded-lg transition-colors ${
+                            copiedCourseId === course.id
+                              ? 'bg-green-500/30 text-green-400'
+                              : 'bg-blue-500/20 hover:bg-blue-500/30 text-blue-400'
+                          }`}
+                          title="Copy share link"
+                        >
+                          {copiedCourseId === course.id ? <Check size={16} /> : <Copy size={16} />}
+                        </button>
+                      )}
                       <button
                         onClick={() => onEditCourse?.(course)}
                         className="p-2 bg-lime/20 hover:bg-lime/30 text-lime rounded-lg transition-colors"
