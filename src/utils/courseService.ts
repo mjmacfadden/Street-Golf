@@ -32,11 +32,14 @@ export interface Course {
   id: string;
   userId: string;
   courseName: string;
+  description?: string; // New: course description
   creatorName?: string;
   headerImage?: string | null;
   holes: CourseHole[];
   status: 'draft' | 'published';
   visibility?: 'public' | 'private'; // 'public' = appears in index, 'private' = hidden but shareable via URL
+  averageRating?: number; // New: average rating (1-5)
+  totalRatings?: number; // New: total number of ratings
   createdAt: Date;
   updatedAt: Date;
   publishedAt?: Date;
@@ -784,5 +787,88 @@ export const migrateCourseToFirebase = async (
   } catch (error) {
     console.error(`Failed to migrate course "${courseName}":`, error);
     throw error;
+  }
+};
+
+/**
+ * Rate a course (1-5 stars)
+ * @param courseId - The course to rate
+ * @param userId - User ID (must be authenticated)
+ * @param rating - Rating value (1-5)
+ */
+export const rateCourse = async (courseId: string, userId: string, rating: number): Promise<void> => {
+  try {
+    if (rating < 1 || rating > 5) {
+      throw new Error('Rating must be between 1 and 5');
+    }
+
+    const ratingRef = doc(db, 'courses', courseId, 'ratings', userId);
+    await setDoc(ratingRef, {
+      rating,
+      timestamp: Timestamp.now(),
+    });
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(`Failed to rate course: ${error.message}`);
+    }
+    throw new Error('Failed to rate course: Unknown error');
+  }
+};
+
+/**
+ * Get user's rating for a course (or undefined if not rated)
+ * @param courseId - The course ID
+ * @param userId - User ID
+ */
+export const getUserCourseRating = async (courseId: string, userId: string): Promise<number | undefined> => {
+  try {
+    const ratingRef = doc(db, 'courses', courseId, 'ratings', userId);
+    const ratingDoc = await getDoc(ratingRef);
+    return ratingDoc.exists() ? ratingDoc.data().rating : undefined;
+  } catch (error) {
+    console.warn('Failed to fetch user rating:', error);
+    return undefined;
+  }
+};
+
+/**
+ * Get all ratings for a course
+ * @param courseId - The course ID
+ * @returns Object with averageRating, totalRatings, and individual ratings
+ */
+export const getCourseRatings = async (courseId: string): Promise<{
+  averageRating: number;
+  totalRatings: number;
+  ratings: Record<string, number>;
+}> => {
+  try {
+    const ratingsRef = collection(db, 'courses', courseId, 'ratings');
+    const snapshot = await getDocs(ratingsRef);
+    
+    const ratings: Record<string, number> = {};
+    let totalRating = 0;
+    let totalCount = 0;
+
+    snapshot.docs.forEach(doc => {
+      const rating = doc.data().rating;
+      ratings[doc.id] = rating;
+      totalRating += rating;
+      totalCount += 1;
+    });
+
+    const averageRating = totalCount > 0 ? totalRating / totalCount : 0;
+
+    return {
+      averageRating,
+      totalRatings: totalCount,
+      ratings,
+    };
+  } catch (error) {
+    console.warn('Failed to fetch course ratings:', error);
+    return {
+      averageRating: 0,
+      totalRatings: 0,
+      ratings: {},
+    };
   }
 };

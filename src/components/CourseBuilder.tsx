@@ -48,6 +48,7 @@ export default function CourseBuilder({
   const courseHeaderImageFileInputRef = useRef<HTMLInputElement>(null);
 
   const [courseName, setCourseName] = useState('');
+  const [courseDescription, setCourseDescription] = useState('');
   const [courseHeaderImage, setCourseHeaderImage] = useState<string | null>(null);
   const [courseHeaderImageLoading, setCourseHeaderImageLoading] = useState(false);
   const [courseHeaderImageError, setCourseHeaderImageError] = useState<string | null>(null);
@@ -148,6 +149,7 @@ export default function CourseBuilder({
   useEffect(() => {
     if (editingCourse) {
       setCourseName(editingCourse.courseName);
+      setCourseDescription(editingCourse.description || '');
       setCourseHeaderImage(editingCourse.headerImage || null);
       setCourseVisibility(editingCourse.visibility || 'public');
       
@@ -244,14 +246,16 @@ export default function CourseBuilder({
     });
   };
 
-  const saveHoleEdit = () => {
-    if (!editingHoleId || !editingHoleData) return;
-    
-    const updatedHoles = holes.map(hole => 
-      hole.id === editingHoleId ? { ...hole, ...editingHoleData } : hole
-    );
-    setHoles(updatedHoles);
-    cancelHoleEdit();
+  const applyPendingHoleEdits = () => {
+    // Apply any pending hole edits to the holes array
+    if (editingHoleId && editingHoleData) {
+      const updatedHoles = holes.map(hole => 
+        hole.id === editingHoleId ? { ...hole, ...editingHoleData } : hole
+      );
+      setHoles(updatedHoles);
+      setEditingHoleId(null);
+      setEditingHoleData(null);
+    }
   };
 
   const cancelHoleEdit = () => {
@@ -300,6 +304,9 @@ export default function CourseBuilder({
         // Update existing course
         const courseRef = doc(db, 'users', currentUser.uid, 'courses', editingCourse.id);
         
+        // Apply any pending hole edits first
+        applyPendingHoleEdits();
+        
         // Clean holes array - reconstruct each hole with only expected fields
         const cleanedHoles = holes.map(hole => ({
           id: hole.id || '',
@@ -318,6 +325,7 @@ export default function CourseBuilder({
         // Build update object, removing any undefined values
         const updateData: any = {
           courseName: courseName || '',
+          description: courseDescription || undefined,
           holes: cleanedHoles,
           headerImage: courseHeaderImage || null,
           creatorName: currentUser.displayName || currentUser.email || 'Anonymous',
@@ -363,6 +371,9 @@ export default function CourseBuilder({
         }, 2000);
       } else {
         // Create new course
+        // Apply any pending hole edits first
+        applyPendingHoleEdits();
+        
         // Clean holes array - reconstruct each hole with only expected fields
         const cleanedHoles = holes.map(hole => ({
           id: hole.id || '',
@@ -380,6 +391,7 @@ export default function CourseBuilder({
         
         const courseId = await saveCourse(currentUser.uid, {
           courseName: courseName || '',
+          description: courseDescription || undefined,
           headerImage: courseHeaderImage || null,
           creatorName: currentUser.displayName || currentUser.email || 'Anonymous',
           holes: cleanedHoles,
@@ -395,6 +407,7 @@ export default function CourseBuilder({
             userId: currentUser.uid,
             creatorUid: currentUser.uid,
             courseName,
+            description: courseDescription || undefined,
             creatorName: currentUser.displayName || currentUser.email || 'Anonymous',
             visibility: courseVisibility,
             holesCount: holes.length,
@@ -413,6 +426,7 @@ export default function CourseBuilder({
         // Reset form after 2 seconds
         setTimeout(() => {
           setCourseName('');
+          setCourseDescription('');
           setHoles([]);
           setCurrentHole({
             name: '',
@@ -865,6 +879,19 @@ export default function CourseBuilder({
                 placeholder="e.g., Downtown District Open"
                 className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-white/40 focus:outline-none focus:border-lime/50 focus:bg-white/15 transition"
               />
+            </div>
+
+            <div>
+              <label className="text-white/70 text-xs font-bold uppercase tracking-wider mb-2 block">Description</label>
+              <textarea
+                value={courseDescription}
+                onChange={(e) => setCourseDescription(e.target.value)}
+                placeholder="Describe this course... (e.g., difficulty, terrain, highlights)"
+                maxLength={500}
+                rows={3}
+                className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-white/40 focus:outline-none focus:border-lime/50 focus:bg-white/15 transition resize-none"
+              />
+              <p className="text-white/40 text-xs mt-1">{courseDescription.length}/500</p>
             </div>
 
             <div>
@@ -1532,19 +1559,13 @@ export default function CourseBuilder({
                               </div>
                             </div>
 
-                            {/* Save/Cancel Buttons */}
+                            {/* Cancel Button */}
                             <div className="flex gap-2">
                               <button
-                                onClick={saveHoleEdit}
-                                className="flex-1 px-3 py-2 bg-lime text-dark font-bold text-xs rounded-lg hover:bg-lime/90 transition"
-                              >
-                                Save
-                              </button>
-                              <button
                                 onClick={cancelHoleEdit}
-                                className="flex-1 px-3 py-2 bg-white/10 text-white font-bold text-xs rounded-lg hover:bg-white/20 transition"
+                                className="w-full px-3 py-2 bg-white/10 text-white font-bold text-xs rounded-lg hover:bg-white/20 transition"
                               >
-                                Cancel
+                                Discard Changes
                               </button>
                             </div>
                           </div>

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Edit, Trash2, LogOut, AlertTriangle, Loader, Heart, Copy, Check, MapPin } from 'lucide-react';
+import { Edit, Trash2, LogOut, AlertTriangle, Loader, Heart, Copy, Check } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { AuthModal } from './AuthModal';
 import { AdminPanel } from './AdminPanel';
@@ -16,10 +16,9 @@ interface ProfileProps {
   onCloseAuthModal?: () => void;
   onViewFavoriteCourse?: (course: FirestoreCourse) => void;
   onViewBuiltCourse?: (course: FirestoreCourse) => void;
-  onRequestLocation?: () => void;
 }
 
-export const Profile: React.FC<ProfileProps> = ({ onEditCourse, onLogout, onDeleteCourse, onCloseAuthModal, onViewFavoriteCourse, onViewBuiltCourse, onRequestLocation }) => {
+export const Profile: React.FC<ProfileProps> = ({ onEditCourse, onLogout, onDeleteCourse, onCloseAuthModal, onViewFavoriteCourse, onViewBuiltCourse }) => {
   const { currentUser, logout } = useAuth();
   const [courses, setCourses] = useState<FirestoreCourse[]>([]);
   const [favoriteCourses, setFavoriteCourses] = useState<FirestoreCourse[]>([]);
@@ -154,13 +153,6 @@ export const Profile: React.FC<ProfileProps> = ({ onEditCourse, onLogout, onDele
           </div>
 
           <div className="flex gap-3">
-            <button
-              onClick={onRequestLocation}
-              className="flex-1 flex items-center justify-center gap-2 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/50 text-blue-400 py-2 rounded-xl font-bold transition-colors"
-            >
-              <MapPin size={18} />
-              Location
-            </button>
             <button
               onClick={handleLogout}
               className="flex-1 flex items-center justify-center gap-2 bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 text-red-400 py-2 rounded-xl font-bold transition-colors"

@@ -1,4 +1,4 @@
-import { useState, useEffect, ReactNode } from 'react';
+import { useState, useEffect, ReactNode, useRef } from 'react';
 import { APIProvider } from '@vis.gl/react-google-maps';
 import { Map as MapIcon, List as ListIcon, History as HistoryIcon, Play, ChevronLeft, ChevronRight, Pencil, Flag, Trophy, Image as ImageIcon, X, Home, Info, AlertTriangle, Hammer, LogOut, User, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -11,7 +11,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { AuthModal } from './components/AuthModal';
 import { getPublishedCourses, getUserCourses, getCourseById, saveRound, getUserRounds, deleteRound as deleteRoundFromFirestore, deleteAllIncompleteRounds } from './utils/courseService';
 import { captureGPSLocation } from './utils/geolocation';
-import { sortCoursesByDistance } from './utils/distance';
+import { sortCoursesByDistance, calculateDistance } from './utils/distance';
 import type { Course as FirestoreCourse } from './utils/courseService';
 import { COURSES, type Course } from './constants/course';
 import { Round, Score } from './types';
@@ -44,7 +44,27 @@ function AppContent() {
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
   
   // Geolocation
+  // Geolocation
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const locationInitializedRef = useRef(false);
+  
+  // Load cached location on first mount
+  useEffect(() => {
+    if (!locationInitializedRef.current) {
+      locationInitializedRef.current = true;
+      try {
+        const cached = localStorage.getItem('userLocation');
+        if (cached) {
+          const location = JSON.parse(cached);
+          console.log('📍 Loaded cached location on startup:', location);
+          setUserLocation(location);
+        }
+      } catch (error) {
+        console.warn('Failed to parse cached location');
+      }
+    }
+  }, []);
+
   const [locationError, setLocationError] = useState<string | null>(null);
   const [locationErrorCode, setLocationErrorCode] = useState<string | null>(null);
   const [showLocationRetryPrompt, setShowLocationRetryPrompt] = useState(false);
@@ -61,6 +81,12 @@ function AppContent() {
   const [deleteConfirmRound, setDeleteConfirmRound] = useState<string | null>(null);
   const [editingCourse, setEditingCourse] = useState<FirestoreCourse | null>(null);
   const [courseRefreshTrigger, setCourseRefreshTrigger] = useState(0);
+  
+  // Location tracking (to avoid duplicate/excessive requests)
+  const lastLocationCaptureRef = useRef<number>(0);
+  const locationCaptureTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isCapturingLocationRef = useRef(false);
+  const MIN_LOCATION_CAPTURE_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
   // Helper: Find the first hole without a score in a round
   const getFirstUnscoredHoleIndex = (round: Round | null, holes: typeof currentCourseHoles): number | null => {
@@ -83,7 +109,10 @@ function AppContent() {
       id: fsCourse.id,
       name: fsCourse.courseName,
       location: 'User Created Course',
+      description: fsCourse.description,
       headerImage: fsCourse.headerImage || null,
+      ...(fsCourse.averageRating !== undefined && { averageRating: fsCourse.averageRating }),
+      ...(fsCourse.totalRatings !== undefined && { totalRatings: fsCourse.totalRatings }),
       holes: fsCourse.holes.map((hole, idx) => ({
         number: idx + 1,
         name: hole.name,
@@ -191,78 +220,106 @@ function AppContent() {
     }
   }, [currentUser, loading, courseRefreshTrigger]);
 
-  // Load cached location from localStorage on app startup
+  // Capture fresh location lazily in background (don't update state to avoid visual refresh)
+  // Just cache it for next app load and silently update sorted courses if location changed significantly
   useEffect(() => {
-    const cachedLocation = localStorage.getItem('userLocation');
-    if (cachedLocation && !userLocation) {
-      try {
-        const location = JSON.parse(cachedLocation);
-        console.log('📍 Loaded cached location:', location);
-        setUserLocation(location);
-      } catch (error) {
-        console.warn('Failed to parse cached location');
+    const delayedCapture = setTimeout(() => {
+      if (!currentHoleIdx && !isCapturingLocationRef.current) {
+        console.log('📍 Capturing fresh geolocation in background (lazy)...');
+        isCapturingLocationRef.current = true;
+        
+        const captureLocation = async () => {
+          try {
+            setLocationError(null);
+            setLocationErrorCode(null);
+            const freshLocation = await captureGPSLocation(10000, 10);
+            console.log('✅ Fresh location captured in background:', freshLocation);
+            
+            // Always save to localStorage for next load
+            localStorage.setItem('userLocation', JSON.stringify(freshLocation));
+            lastLocationCaptureRef.current = Date.now();
+            
+            // Only update UI if location changed significantly (more than ~100m)
+            // This avoids unnecessary re-renders when location hasn't changed
+            if (userLocation) {
+              const distance = calculateDistance(
+                userLocation.lat,
+                userLocation.lng,
+                freshLocation.lat,
+                freshLocation.lng
+              );
+              
+              if (distance > 0.06) { // ~100 meters in miles
+                console.log('📍 Location changed significantly, updating display...');
+                setUserLocation(freshLocation);
+                setShowLocationRetryPrompt(false);
+              } else {
+                console.log('📍 Location unchanged (moved only', distance.toFixed(3), 'mi), no re-render');
+              }
+            }
+          } catch (error: any) {
+            console.warn('⚠️ Background location capture failed:', error);
+            setLocationErrorCode(error.code || 'UNKNOWN');
+            // Show retry prompt for permission denied or location services disabled
+            if (error.code === 'PERMISSION_DENIED' || error.code === 'POSITION_UNAVAILABLE') {
+              setShowLocationRetryPrompt(true);
+            }
+            // Don't show error if we have cached location
+            if (!userLocation) {
+              setLocationError(error.message || 'Could not get your location');
+            }
+          } finally {
+            isCapturingLocationRef.current = false;
+          }
+        };
+
+        captureLocation();
       }
-    }
-  }, []);
+    }, 2000); // Wait 2 seconds before capturing fresh location
+    
+    return () => clearTimeout(delayedCapture);
+  }, [currentHoleIdx]);
 
-  // Capture fresh location on app startup in the background
-  useEffect(() => {
-    if (!loading && !currentHoleIdx) {
-      console.log('📍 Capturing fresh geolocation in background on app startup...');
-      const captureLocation = async () => {
-        try {
-          setLocationError(null);
-          setLocationErrorCode(null);
-          const location = await captureGPSLocation(10000, 10);
-          console.log('✅ Fresh location captured:', location);
-          setUserLocation(location);
-          setShowLocationRetryPrompt(false);
-          // Cache the location for next load
-          localStorage.setItem('userLocation', JSON.stringify(location));
-        } catch (error: any) {
-          console.warn('⚠️ Background location capture failed:', error);
-          setLocationErrorCode(error.code || 'UNKNOWN');
-          // Show retry prompt for permission denied
-          if (error.code === 'PERMISSION_DENIED') {
-            setShowLocationRetryPrompt(true);
-          }
-          // Don't show error if we have cached location
-          if (!localStorage.getItem('userLocation')) {
-            setLocationError(error.message || 'Could not get your location');
-          }
-        }
-      };
-
-      captureLocation();
-    }
-  }, [loading, currentHoleIdx]);
-
-  // Capture user location when map view is opened
+  // Capture user location when map view is opened (with smart caching)
   useEffect(() => {
     if (activeTab === 'map' && currentHoleIdx === null) {
-      console.log('📍 Capturing geolocation for map view...');
-      const captureLocation = async () => {
-        try {
-          setLocationError(null);
-          setLocationErrorCode(null);
-          const location = await captureGPSLocation(10000, 10);
-          console.log('✅ Location captured successfully:', location);
-          setUserLocation(location);
-          setShowLocationRetryPrompt(false);
-          // Cache the location for next load
-          localStorage.setItem('userLocation', JSON.stringify(location));
-        } catch (error: any) {
-          console.warn('❌ Failed to capture location:', error);
-          setLocationErrorCode(error.code || 'UNKNOWN');
-          setLocationError(error.message || 'Could not get your location');
-          // Show retry prompt for permission denied
-          if (error.code === 'PERMISSION_DENIED') {
-            setShowLocationRetryPrompt(true);
+      const timeSinceLastCapture = Date.now() - lastLocationCaptureRef.current;
+      const shouldRecapture = timeSinceLastCapture > MIN_LOCATION_CAPTURE_INTERVAL;
+      
+      // Only capture if:
+      // 1. We haven't captured yet, OR
+      // 2. Enough time has passed since last capture, AND
+      // 3. We're not already capturing
+      if ((lastLocationCaptureRef.current === 0 || shouldRecapture) && !isCapturingLocationRef.current) {
+        console.log('📍 Capturing geolocation for map view...');
+        isCapturingLocationRef.current = true;
+        
+        const captureLocation = async () => {
+          try {
+            setLocationError(null);
+            setLocationErrorCode(null);
+            const location = await captureGPSLocation(10000, 10);
+            console.log('✅ Location captured successfully:', location);
+            setUserLocation(location);
+            setShowLocationRetryPrompt(false);
+            lastLocationCaptureRef.current = Date.now();
+            // Cache the location for next load
+            localStorage.setItem('userLocation', JSON.stringify(location));
+          } catch (error: any) {
+            console.warn('❌ Failed to capture location:', error);
+            setLocationErrorCode(error.code || 'UNKNOWN');
+            setLocationError(error.message || 'Could not get your location');
+            // Show retry prompt for permission denied or location services disabled
+            if (error.code === 'PERMISSION_DENIED' || error.code === 'POSITION_UNAVAILABLE') {
+              setShowLocationRetryPrompt(true);
+            }
+          } finally {
+            isCapturingLocationRef.current = false;
           }
-        }
-      };
+        };
 
-      captureLocation();
+        captureLocation();
+      }
     }
   }, [activeTab, currentHoleIdx]);
 
@@ -282,6 +339,24 @@ function AppContent() {
       setLocationError(null);
     }
   }, [currentHoleIdx]);
+
+  // Clear location when leaving map view (but not when in an active round)
+  useEffect(() => {
+    if (activeTab !== 'map' && currentHoleIdx === null && activeTab !== 'home') {
+      console.log('📍 Clearing location - user left map view');
+      setUserLocation(null);
+      setLocationError(null);
+    }
+  }, [activeTab, currentHoleIdx]);
+
+  // Cleanup: Cancel any pending location capture if component unmounts
+  useEffect(() => {
+    return () => {
+      if (locationCaptureTimeoutRef.current) {
+        clearTimeout(locationCaptureTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Ensure selectedCourse is valid when availableCourses changes
   useEffect(() => {
@@ -609,8 +684,8 @@ function AppContent() {
       console.warn('❌ Retry failed:', error);
       setLocationErrorCode(error.code || 'UNKNOWN');
       setLocationError(error.message || 'Could not get your location');
-      // Show retry prompt again if permission denied
-      if (error.code === 'PERMISSION_DENIED') {
+      // Show retry prompt again if permission denied or location services disabled
+      if (error.code === 'PERMISSION_DENIED' || error.code === 'POSITION_UNAVAILABLE') {
         setShowLocationRetryPrompt(true);
       }
     }
@@ -991,7 +1066,10 @@ function AppContent() {
                       id: course.id,
                       name: course.courseName,
                       location: 'Published Course',
+                      description: course.description,
                       headerImage: course.headerImage || null,
+                      ...(course.averageRating !== undefined && { averageRating: course.averageRating }),
+                      ...(course.totalRatings !== undefined && { totalRatings: course.totalRatings }),
                       holes: course.holes.map((hole, idx) => ({
                         number: idx + 1,
                         name: hole.name,
@@ -1022,7 +1100,10 @@ function AppContent() {
                       id: course.id,
                       name: course.courseName,
                       location: 'User Created Course',
+                      description: course.description,
                       headerImage: course.headerImage || null,
+                      ...(course.averageRating !== undefined && { averageRating: course.averageRating }),
+                      ...(course.totalRatings !== undefined && { totalRatings: course.totalRatings }),
                       holes: course.holes.map((hole, idx) => ({
                         number: idx + 1,
                         name: hole.name,
@@ -1065,7 +1146,7 @@ function AppContent() {
                       console.warn('❌ Failed to capture location from Profile:', error);
                       setLocationErrorCode(error.code || 'UNKNOWN');
                       setLocationError(error.message || 'Could not get your location');
-                      if (error.code === 'PERMISSION_DENIED') {
+                      if (error.code === 'PERMISSION_DENIED' || error.code === 'POSITION_UNAVAILABLE') {
                         setShowLocationRetryPrompt(true);
                       }
                     }
@@ -1308,20 +1389,59 @@ function AppContent() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                   </div>
-                  <h2 className="text-2xl font-black text-white mb-2">Location Permission Required</h2>
-                  <p className="text-white/60 mb-6">
-                    Street Golf needs your location to sort courses by distance and show accurate hole distances. Please allow access to continue.
+                  <h2 className="text-2xl font-black text-white mb-3">
+                    {locationErrorCode === 'POSITION_UNAVAILABLE' ? 'Location Services Disabled' : 'Location Permission Required'}
+                  </h2>
+                  <p className="text-white/60 mb-6 text-sm">
+                    Street Golf needs your location to sort courses by distance and show accurate hole distances.
                   </p>
+                  
+                  {locationErrorCode === 'POSITION_UNAVAILABLE' ? (
+                    <div className="bg-white/5 rounded-lg p-4 mb-6 text-left border border-white/10">
+                      <p className="font-bold text-white mb-3 text-sm">Enable Location Services:</p>
+                      <div className="text-white/50 text-xs space-y-2">
+                        <div>
+                          <p className="font-semibold text-white/70 mb-1">📱 iOS:</p>
+                          <p>Settings → Privacy → Location Services → Enable it → Find "Street Golf" and select "While Using"</p>
+                        </div>
+                        <div className="mt-3">
+                          <p className="font-semibold text-white/70 mb-1">🤖 Android:</p>
+                          <p>Settings → Location → Enable Location → App Permissions → Grant location access to Street Golf</p>
+                        </div>
+                        <div className="mt-3">
+                          <p className="font-semibold text-white/70 mb-1">🌐 Browser:</p>
+                          <p>Check your browser's address bar for a location icon → Click it → Select "Allow"</p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-white/5 rounded-lg p-4 mb-6 text-left border border-white/10">
+                      <p className="font-bold text-white mb-3 text-sm">Grant Permission:</p>
+                      <div className="text-white/50 text-xs space-y-2">
+                        <p>When prompted, tap "Allow" to share your location with Street Golf.</p>
+                        <p className="mt-2">If you previously denied permission:</p>
+                        <div className="mt-2">
+                          <p className="font-semibold text-white/70 mb-1">📱 iOS:</p>
+                          <p>Settings → Privacy → Location Services → Street Golf → Select "While Using"</p>
+                        </div>
+                        <div className="mt-2">
+                          <p className="font-semibold text-white/70 mb-1">🤖 Android:</p>
+                          <p>Settings → Apps → Street Golf → Permissions → Location → Allow</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
                   <div className="flex gap-3">
                     <button
                       onClick={() => setShowLocationRetryPrompt(false)}
-                      className="flex-1 px-4 py-2 bg-white/10 rounded-lg text-white font-bold hover:bg-white/20 transition-colors"
+                      className="flex-1 px-4 py-2 bg-white/10 rounded-lg text-white font-bold hover:bg-white/20 transition-colors text-sm"
                     >
                       Dismiss
                     </button>
                     <button
                       onClick={handleRetryLocation}
-                      className="flex-1 px-4 py-2 bg-lime text-dark rounded-lg font-bold hover:bg-lime/90 transition-colors"
+                      className="flex-1 px-4 py-2 bg-lime text-dark rounded-lg font-bold hover:bg-lime/90 transition-colors text-sm"
                     >
                       Try Again
                     </button>

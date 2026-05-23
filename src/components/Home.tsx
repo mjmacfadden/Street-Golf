@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Play, Heart, Search, X, MapPin, AlertTriangl
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { AuthModal } from './AuthModal';
+import { RatingComponent } from './RatingComponent';
 import { addFavorite, removeFavorite, getUserFavorites } from '../utils/courseService';
 import type { Course as FirestoreCourse } from '../utils/courseService';
 import type { Course } from '../constants/course';
@@ -585,6 +586,26 @@ export default function Home({ courses, onSelectCourse, onPlayNow, loading = fal
                     />
                   </motion.button>
                 </div>
+
+                {/* Description */}
+                {('description' in currentCourse && currentCourse.description) && (
+                  <p className="text-dark/70 text-sm">{currentCourse.description}</p>
+                )}
+
+                {/* Rating */}
+                {'id' in currentCourse && (
+                  <div className="py-2 border-t border-gray-200">
+                    <RatingComponent
+                      courseId={currentCourse.id}
+                      averageRating={'averageRating' in currentCourse ? currentCourse.averageRating || 0 : 0}
+                      totalRatings={'totalRatings' in currentCourse ? currentCourse.totalRatings || 0 : 0}
+                      onRatingSubmitted={() => {
+                        // Optionally refetch course data here
+                        console.log('Rating submitted, course data may need refresh');
+                      }}
+                    />
+                  </div>
+                )}
 
                 {/* Holes List */}
                 <div>

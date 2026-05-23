@@ -4,8 +4,11 @@ export interface Course {
   id: string;
   name: string;
   location: string;
+  description?: string; // New: course description
   holes: Hole[];
   headerImage?: string | null;
+  averageRating?: number; // New: average rating (1-5)
+  totalRatings?: number; // New: total number of ratings
 }
 
 export const STREET_GOLF_COURSE: Hole[] = [

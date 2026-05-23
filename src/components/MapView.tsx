@@ -11,6 +11,7 @@ function MapHandler({ holes, currentHoleIndex, userLocation }: { holes: Hole[], 
   const map = useMap();
   const mapsLib = useMapsLibrary('maps');
   const courseLinesRef = useRef<google.maps.Polyline[]>([]);
+  const initialCenteredRef = useRef(false);
 
   // Draw course lines
   useEffect(() => {
@@ -66,13 +67,14 @@ function MapHandler({ holes, currentHoleIndex, userLocation }: { holes: Hole[], 
   useEffect(() => {
     if (!map || !mapsLib) return;
 
-    console.log('MapView centering effect:', { holesCount: holes.length, currentHoleIndex, userLocation });
+    console.log('MapView centering effect:', { holesCount: holes.length, currentHoleIndex });
 
-    // If no holes but has user location, center on user
-    if (holes.length === 0 && userLocation) {
-      console.log('✅ Centering on user location:', userLocation);
+    // If no holes but has user location, center on user only once on initial load
+    if (holes.length === 0 && userLocation && !initialCenteredRef.current) {
+      console.log('✅ Centering on user location (initial):', userLocation);
       map.setCenter(userLocation);
       map.setZoom(17);
+      initialCenteredRef.current = true;
       return;
     }
 
@@ -109,7 +111,7 @@ function MapHandler({ holes, currentHoleIndex, userLocation }: { holes: Hole[], 
     }
     
     prevHoleIndexRef.current = currentHoleIndex;
-  }, [map, holes, currentHoleIndex, mapsLib, userLocation]);
+  }, [map, holes, currentHoleIndex, mapsLib]);
 
   return null;
 }
