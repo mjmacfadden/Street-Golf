@@ -149,8 +149,23 @@ export default function MapView({ holes, currentHoleIndex, onMarkerClick, userLo
               position={userLocation}
               zIndex={100}
             >
-              <div className="w-6 h-6 bg-lime rounded-full border-2 border-white shadow-lg shadow-lime/50 flex items-center justify-center">
-                <div className="w-2 h-2 bg-dark rounded-full" />
+              <div style={{
+                width: '24px',
+                height: '24px',
+                backgroundColor: '#BFFF00',
+                borderRadius: '50%',
+                border: '2px solid white',
+                boxShadow: '0 0 15px rgba(191, 255, 0, 0.5)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+                <div style={{
+                  width: '8px',
+                  height: '8px',
+                  backgroundColor: '#010409',
+                  borderRadius: '50%',
+                }} />
               </div>
             </AdvancedMarker>
           </>

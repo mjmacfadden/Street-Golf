@@ -1047,6 +1047,29 @@ function AppContent() {
                       console.log('🗺️ Viewing built course:', localCourse.name);
                     }, 300);
                   }}
+                  onRequestLocation={async () => {
+                    console.log('📍 Location permission requested from Profile');
+                    // Clear cached location to force fresh request
+                    localStorage.removeItem('userLocation');
+                    setUserLocation(null);
+                    setLocationError(null);
+                    setLocationErrorCode(null);
+                    
+                    try {
+                      const location = await captureGPSLocation(10000, 10);
+                      console.log('✅ Location captured from Profile:', location);
+                      setUserLocation(location);
+                      setShowLocationRetryPrompt(false);
+                      localStorage.setItem('userLocation', JSON.stringify(location));
+                    } catch (error: any) {
+                      console.warn('❌ Failed to capture location from Profile:', error);
+                      setLocationErrorCode(error.code || 'UNKNOWN');
+                      setLocationError(error.message || 'Could not get your location');
+                      if (error.code === 'PERMISSION_DENIED') {
+                        setShowLocationRetryPrompt(true);
+                      }
+                    }
+                  }}
                 />
               </motion.div>
             )}

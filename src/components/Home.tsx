@@ -549,8 +549,15 @@ export default function Home({ courses, onSelectCourse, onPlayNow, loading = fal
                         <p className="text-dark/60 text-sm">By: {getCreatorName(currentCourse)}</p>
                       )}
                       {userLocation && currentCourse.holes && currentCourse.holes[0]?.teeLocation && (
-                        <div className="inline-flex items-center gap-1 text-sm text-slate-400 font-bold">
-                          <MapPin size={14} />
+                        <div style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          fontSize: '14px',
+                          fontWeight: 'bold',
+                          color: '#999999'
+                        }}>
+                          <MapPin size={14} style={{ color: '#999999' }} />
                           {calculateDistance(
                             userLocation.lat,
                             userLocation.lng,
