@@ -82,7 +82,8 @@ function AppContent() {
   const [editingCourse, setEditingCourse] = useState<FirestoreCourse | null>(null);
   const [courseRefreshTrigger, setCourseRefreshTrigger] = useState(0);
   
-  // Location tracking (to avoid duplicate/excessive requests)
+  // Track if a shared course was loaded from URL to keep it pinned to top
+  const sharedCourseIdRef = useRef<string | null>(null);
   const lastLocationCaptureRef = useRef<number>(0);
   const locationCaptureTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isCapturingLocationRef = useRef(false);
@@ -222,9 +223,10 @@ function AppContent() {
 
   // Capture fresh location lazily in background (don't update state to avoid visual refresh)
   // Just cache it for next app load and silently update sorted courses if location changed significantly
+  // But skip if a shared course is being displayed
   useEffect(() => {
     const delayedCapture = setTimeout(() => {
-      if (!currentHoleIdx && !isCapturingLocationRef.current) {
+      if (!currentHoleIdx && !isCapturingLocationRef.current && !sharedCourseIdRef.current) {
         console.log('📍 Capturing fresh geolocation in background (lazy)...');
         isCapturingLocationRef.current = true;
         
@@ -281,8 +283,9 @@ function AppContent() {
   }, [currentHoleIdx]);
 
   // Capture user location when map view is opened (with smart caching)
+  // Skip if a shared course is being displayed
   useEffect(() => {
-    if (activeTab === 'map' && currentHoleIdx === null) {
+    if (activeTab === 'map' && currentHoleIdx === null && !sharedCourseIdRef.current) {
       const timeSinceLastCapture = Date.now() - lastLocationCaptureRef.current;
       const shouldRecapture = timeSinceLastCapture > MIN_LOCATION_CAPTURE_INTERVAL;
       
@@ -324,21 +327,26 @@ function AppContent() {
   }, [activeTab, currentHoleIdx]);
 
   // Sort courses by distance when location becomes available
+  // But only if a shared course is NOT being displayed
   useEffect(() => {
-    if (userLocation && availableCourses.length > 0) {
+    if (userLocation && availableCourses.length > 0 && !sharedCourseIdRef.current) {
       console.log('🎯 Sorting courses by distance from user location...');
       const sorted = sortCoursesByDistance(availableCourses, userLocation.lat, userLocation.lng);
       setSortedCourses(sorted);
     }
   }, [userLocation, availableCourses]);
 
-  // Clear user location when a round is started
+  // Clear shared course tracking and location when user leaves home or starts a round
   useEffect(() => {
+    if (activeTab !== 'home' || currentHoleIdx !== null) {
+      sharedCourseIdRef.current = null;
+    }
+    
     if (currentHoleIdx !== null) {
       setUserLocation(null);
       setLocationError(null);
     }
-  }, [currentHoleIdx]);
+  }, [activeTab, currentHoleIdx]);
 
   // Clear location when leaving map view (but not when in an active round)
   useEffect(() => {
@@ -369,7 +377,7 @@ function AppContent() {
     }
   }, [availableCourses]);
 
-  // Load shared course from URL parameter and switch to map view
+  // Load shared course from URL parameter and switch to home view
   useEffect(() => {
     const loadSharedCourse = async () => {
       const params = new URLSearchParams(window.location.search);
@@ -388,6 +396,18 @@ function AppContent() {
           if (firestoreCourse) {
             sharedCourse = convertFirestoreCourse(firestoreCourse);
             console.log('📍 Loaded shared course directly:', sharedCourse.name);
+            
+            // Track this shared course to keep it pinned to top
+            sharedCourseIdRef.current = sharedCourseId;
+            
+            // Add to availableCourses so it displays in the carousel
+            setAvailableCourses(prev => {
+              if (!prev.find(c => c.id === sharedCourseId)) {
+                // Add to beginning so it shows as the first course in carousel
+                return [sharedCourse, ...prev];
+              }
+              return prev;
+            });
           }
         } catch (err) {
           console.warn('❌ Failed to load shared course:', err);
@@ -396,9 +416,9 @@ function AppContent() {
       }
       
       if (sharedCourse) {
-        console.log('📍 Shared course found, switching to map view:', sharedCourse.name);
+        console.log('📍 Shared course found, switching to home view:', sharedCourse.name);
         setSelectedCourse(sharedCourse);
-        setActiveTab('map');
+        setActiveTab('home');
       } else {
         console.warn('⚠️ Shared course not found:', sharedCourseId);
       }
@@ -735,8 +755,11 @@ function AppContent() {
                 className="h-full w-full"
               >
                 <HomeComponent
-                  courses={userLocation ? sortedCourses : availableCourses}
-                  userLocation={userLocation}
+                  courses={sharedCourseIdRef.current 
+                    ? availableCourses.filter(c => c.id === sharedCourseIdRef.current)
+                    : (userLocation ? sortedCourses : availableCourses)
+                  }
+                  userLocation={sharedCourseIdRef.current ? null : userLocation}
                   onSelectCourse={(course) => {
                     setSelectedCourse(course);
                     setCurrentHoleIdx(null);

@@ -192,21 +192,18 @@ export const publishCourse = async (
 
     await setDoc(courseRef, publishedData);
 
-    // Add to public courses collection (non-blocking)
+    // Add full course data to public courses collection (allows link sharing)
     try {
       const publicRef = doc(db, 'courses', courseId);
       await setDoc(publicRef, {
+        ...course,
         id: courseId,
         userId,
         creatorUid: userId,
-        courseName: course.courseName,
-        creatorName: course.creatorName || 'Anonymous',
         visibility: visibility,
-        holesCount: course.holes.length,
-        createdAt: course.createdAt,
+        status: 'published',
+        updatedAt: Timestamp.fromDate(now),
         publishedAt: Timestamp.fromDate(now),
-        previewTeeImage: course.holes[0]?.teeImage || null,
-        previewPinImage: course.holes[0]?.pinImage || null,
       });
     } catch (err) {
       console.warn('Failed to add course to public collection (non-blocking):', err);
