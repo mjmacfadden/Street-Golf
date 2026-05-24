@@ -121,7 +121,7 @@ export default function Home({ courses, onSelectCourse, onPlayNow, loading = fal
     if ('headerImage' in course && course.headerImage) {
       return course.headerImage;
     }
-    return '/street-golf/images/golf-course.jpg';
+    return '/images/golf-course.jpg';
   };
 
   const getCourseName = (course: Course | FirestoreCourse): string => {
