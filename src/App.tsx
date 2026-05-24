@@ -65,6 +65,39 @@ function AppContent() {
     }
   }, []);
 
+  // Capture active location on app load (so map is ready when user clicks map tab)
+  useEffect(() => {
+    const captureOnLoad = async () => {
+      if (!isCapturingLocationRef.current && lastLocationCaptureRef.current === 0) {
+        console.log('📍 Capturing fresh location on app load...');
+        isCapturingLocationRef.current = true;
+        mapSessionLocationCapturedRef.current = true; // Mark as captured so map view doesn't recapture
+        
+        try {
+          setLocationError(null);
+          setLocationErrorCode(null);
+          const location = await captureGPSLocation(10000, 10);
+          console.log('✅ Location captured on load:', location);
+          setUserLocation(location);
+          setShowLocationRetryPrompt(false);
+          lastLocationCaptureRef.current = Date.now();
+          loadTimeLocationCapturedRef.current = true; // Mark that we captured on load
+          // Cache the location for next load
+          localStorage.setItem('userLocation', JSON.stringify(location));
+        } catch (error: any) {
+          console.warn('❌ Failed to capture location on load:', error);
+          // Don't show error on initial load, silently fail and use cached location
+          setLocationErrorCode(error.code || 'UNKNOWN');
+          // Only show error if user explicitly tries to use map
+        } finally {
+          isCapturingLocationRef.current = false;
+        }
+      }
+    };
+
+    captureOnLoad();
+  }, []);
+
   const [locationError, setLocationError] = useState<string | null>(null);
   const [locationErrorCode, setLocationErrorCode] = useState<string | null>(null);
   const [showLocationRetryPrompt, setShowLocationRetryPrompt] = useState(false);
@@ -87,6 +120,9 @@ function AppContent() {
   const lastLocationCaptureRef = useRef<number>(0);
   const locationCaptureTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isCapturingLocationRef = useRef(false);
+  const lastMapTabRef = useRef(false); // Track last activeTab==='map' state
+  const mapSessionLocationCapturedRef = useRef(false); // Track if we've captured location in this map session
+  const loadTimeLocationCapturedRef = useRef(false); // Track if we captured location on app load
   const MIN_LOCATION_CAPTURE_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
   // Helper: Find the first hole without a score in a round
@@ -284,45 +320,64 @@ function AppContent() {
 
   // Capture user location when map view is opened (with smart caching)
   // Skip if a shared course is being displayed
+  // Only captures once per map view session (unless location was captured on app load)
   useEffect(() => {
-    if (activeTab === 'map' && currentHoleIdx === null && !sharedCourseIdRef.current) {
-      const timeSinceLastCapture = Date.now() - lastLocationCaptureRef.current;
-      const shouldRecapture = timeSinceLastCapture > MIN_LOCATION_CAPTURE_INTERVAL;
-      
-      // Only capture if:
-      // 1. We haven't captured yet, OR
-      // 2. Enough time has passed since last capture, AND
-      // 3. We're not already capturing
-      if ((lastLocationCaptureRef.current === 0 || shouldRecapture) && !isCapturingLocationRef.current) {
-        console.log('📍 Capturing geolocation for map view...');
-        isCapturingLocationRef.current = true;
-        
-        const captureLocation = async () => {
-          try {
-            setLocationError(null);
-            setLocationErrorCode(null);
-            const location = await captureGPSLocation(10000, 10);
-            console.log('✅ Location captured successfully:', location);
-            setUserLocation(location);
-            setShowLocationRetryPrompt(false);
-            lastLocationCaptureRef.current = Date.now();
-            // Cache the location for next load
-            localStorage.setItem('userLocation', JSON.stringify(location));
-          } catch (error: any) {
-            console.warn('❌ Failed to capture location:', error);
-            setLocationErrorCode(error.code || 'UNKNOWN');
-            setLocationError(error.message || 'Could not get your location');
-            // Show retry prompt for permission denied or location services disabled
-            if (error.code === 'PERMISSION_DENIED' || error.code === 'POSITION_UNAVAILABLE') {
-              setShowLocationRetryPrompt(true);
-            }
-          } finally {
-            isCapturingLocationRef.current = false;
-          }
-        };
-
-        captureLocation();
+    const isMapViewActive = activeTab === 'map' && currentHoleIdx === null && !sharedCourseIdRef.current;
+    
+    // Detect when entering map view for a new session
+    if (isMapViewActive && !lastMapTabRef.current) {
+      console.log('🗺️ Entered map view - will capture location once this session');
+      // If we haven't captured yet in this map session, reset flag to allow capture
+      // (unless we captured on app load, in which case reuse that)
+      if (!loadTimeLocationCapturedRef.current) {
+        mapSessionLocationCapturedRef.current = false;
       }
+      // If we did capture on load, keep flag true and mark the on-load capture as used
+      if (loadTimeLocationCapturedRef.current) {
+        loadTimeLocationCapturedRef.current = false; // Mark on-load capture as consumed
+        console.log('🗺️ Using location captured on app load');
+      }
+    }
+    
+    // Detect when leaving map view - reset for next session
+    if (!isMapViewActive && lastMapTabRef.current) {
+      console.log('🗺️ Left map view - reset location capture flag for next session');
+      mapSessionLocationCapturedRef.current = false;
+    }
+    
+    lastMapTabRef.current = isMapViewActive;
+    
+    // Capture location once per map session
+    if (isMapViewActive && !mapSessionLocationCapturedRef.current && !isCapturingLocationRef.current) {
+      console.log('📍 Capturing geolocation for map view...');
+      isCapturingLocationRef.current = true;
+      mapSessionLocationCapturedRef.current = true; // Mark as captured immediately to prevent duplicate requests
+      
+      const captureLocation = async () => {
+        try {
+          setLocationError(null);
+          setLocationErrorCode(null);
+          const location = await captureGPSLocation(10000, 10);
+          console.log('✅ Location captured successfully:', location);
+          setUserLocation(location);
+          setShowLocationRetryPrompt(false);
+          lastLocationCaptureRef.current = Date.now();
+          // Cache the location for next load
+          localStorage.setItem('userLocation', JSON.stringify(location));
+        } catch (error: any) {
+          console.warn('❌ Failed to capture location:', error);
+          setLocationErrorCode(error.code || 'UNKNOWN');
+          setLocationError(error.message || 'Could not get your location');
+          // Show retry prompt for permission denied or location services disabled
+          if (error.code === 'PERMISSION_DENIED' || error.code === 'POSITION_UNAVAILABLE') {
+            setShowLocationRetryPrompt(true);
+          }
+        } finally {
+          isCapturingLocationRef.current = false;
+        }
+      };
+
+      captureLocation();
     }
   }, [activeTab, currentHoleIdx]);
 
