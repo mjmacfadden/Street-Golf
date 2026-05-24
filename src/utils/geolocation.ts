@@ -92,8 +92,8 @@ export const captureGPSLocation = (
       },
       (error) => {
         // On iOS, sometimes the error callback is called even before the success callback
-        // Don't reject immediately if we haven't received any callback yet
-        if (isIOS && !hasReceivedCallback) {
+        // Don't reject immediately for transient errors, BUT always reject for permission denied
+        if (isIOS && !hasReceivedCallback && error.code !== error.PERMISSION_DENIED) {
           return; // Wait for potential success callback
         }
 
