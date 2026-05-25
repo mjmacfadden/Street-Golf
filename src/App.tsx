@@ -12,7 +12,7 @@ import { AuthModal } from './components/AuthModal';
 import { getPublishedCourses, getUserCourses, getCourseById, saveRound, getUserRounds, deleteRound as deleteRoundFromFirestore, deleteAllIncompleteRounds } from './utils/courseService';
 import { captureGPSLocation } from './utils/geolocation';
 import { sortCoursesByDistance, calculateDistance } from './utils/distance';
-import type { Course as FirestoreCourse } from './utils/courseService';
+import type { Course as FirestoreCourse, CourseHole } from './utils/courseService';
 import { COURSES, type Course } from './constants/course';
 import { Round, Score } from './types';
 import { getImagePath } from './utils/paths';
@@ -150,19 +150,21 @@ function AppContent() {
       headerImage: fsCourse.headerImage || null,
       ...(fsCourse.averageRating !== undefined && { averageRating: fsCourse.averageRating }),
       ...(fsCourse.totalRatings !== undefined && { totalRatings: fsCourse.totalRatings }),
-      holes: fsCourse.holes.map((hole, idx) => ({
-        number: idx + 1,
-        name: hole.name,
-        teeLocation: hole.teeLocation,
-        teeDescription: hole.teeDescription,
-        teeImage: hole.teeImage || undefined,
-        pinLocation: hole.pinLocation,
-        pinDescription: hole.pinDescription,
-        pinImage: hole.pinImage || undefined,
-        par: hole.par,
-        tip: hole.tip,
-        hazard: hole.hazard,
-      })),
+      holes: (fsCourse.holes || [])
+        .filter((hole): hole is CourseHole => hole !== null && hole !== undefined)
+        .map((hole, idx) => ({
+          number: idx + 1,
+          name: hole.name,
+          teeLocation: hole.teeLocation,
+          teeDescription: hole.teeDescription,
+          teeImage: hole.teeImage || undefined,
+          pinLocation: hole.pinLocation,
+          pinDescription: hole.pinDescription,
+          pinImage: hole.pinImage || undefined,
+          par: hole.par,
+          tip: hole.tip,
+          hazard: hole.hazard,
+        })),
     };
   };
 
@@ -1148,19 +1150,21 @@ function AppContent() {
                       headerImage: course.headerImage || null,
                       ...(course.averageRating !== undefined && { averageRating: course.averageRating }),
                       ...(course.totalRatings !== undefined && { totalRatings: course.totalRatings }),
-                      holes: course.holes.map((hole, idx) => ({
-                        number: idx + 1,
-                        name: hole.name,
-                        teeLocation: hole.teeLocation,
-                        teeDescription: hole.teeDescription,
-                        teeImage: hole.teeImage || undefined,
-                        pinLocation: hole.pinLocation,
-                        pinDescription: hole.pinDescription,
-                        pinImage: hole.pinImage || undefined,
-                        par: hole.par,
-                        tip: hole.tip,
-                        hazard: hole.hazard,
-                      })),
+                      holes: (course.holes || [])
+                        .filter((hole): hole is CourseHole => hole !== null && hole !== undefined)
+                        .map((hole, idx) => ({
+                          number: idx + 1,
+                          name: hole.name,
+                          teeLocation: hole.teeLocation,
+                          teeDescription: hole.teeDescription,
+                          teeImage: hole.teeImage || undefined,
+                          pinLocation: hole.pinLocation,
+                          pinDescription: hole.pinDescription,
+                          pinImage: hole.pinImage || undefined,
+                          par: hole.par,
+                          tip: hole.tip,
+                          hazard: hole.hazard,
+                        })),
                     };
                     
                     setSelectedCourse(localCourse);
@@ -1182,19 +1186,21 @@ function AppContent() {
                       headerImage: course.headerImage || null,
                       ...(course.averageRating !== undefined && { averageRating: course.averageRating }),
                       ...(course.totalRatings !== undefined && { totalRatings: course.totalRatings }),
-                      holes: course.holes.map((hole, idx) => ({
-                        number: idx + 1,
-                        name: hole.name,
-                        teeLocation: hole.teeLocation,
-                        teeDescription: hole.teeDescription,
-                        teeImage: hole.teeImage || undefined,
-                        pinLocation: hole.pinLocation,
-                        pinDescription: hole.pinDescription,
-                        pinImage: hole.pinImage || undefined,
-                        par: hole.par,
-                        tip: hole.tip,
-                        hazard: hole.hazard,
-                      })),
+                      holes: (course.holes || [])
+                        .filter((hole): hole is CourseHole => hole !== null && hole !== undefined)
+                        .map((hole, idx) => ({
+                          number: idx + 1,
+                          name: hole.name,
+                          teeLocation: hole.teeLocation,
+                          teeDescription: hole.teeDescription,
+                          teeImage: hole.teeImage || undefined,
+                          pinLocation: hole.pinLocation,
+                          pinDescription: hole.pinDescription,
+                          pinImage: hole.pinImage || undefined,
+                          par: hole.par,
+                          tip: hole.tip,
+                          hazard: hole.hazard,
+                        })),
                     };
                     
                     setSelectedCourse(localCourse);
@@ -1298,7 +1304,9 @@ function AppContent() {
                   <div className="space-y-3">
                     {(() => {
                       const roundCourse = availableCourses.find(c => c.id === selectedHistoryRound.courseId) || availableCourses[0];
-                      return roundCourse.holes.map((hole) => {
+                      return (roundCourse.holes || [])
+                        .filter((hole): hole is typeof roundCourse.holes[0] => hole !== null && hole !== undefined)
+                        .map((hole) => {
                         const score = selectedHistoryRound.scores[hole.number];
                         return (
                           <div 

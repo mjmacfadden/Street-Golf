@@ -3,7 +3,7 @@ import { MapPin, Image as ImageIcon, Trash2, Plus, AlertCircle, Loader, X, Chevr
 import { motion, AnimatePresence } from 'framer-motion';
 import { captureLocationWithFallback, formatAccuracy, isAccuracyGood } from '../utils/geolocation';
 import { uploadImage, validateImageFile } from '../utils/imageUpload';
-import { saveCourse } from '../utils/courseService';
+import { saveCourse, type CourseHole } from '../utils/courseService';
 import { getImagePath } from '../utils/paths';
 import { useAuth } from '../context/AuthContext';
 import CameraCapture from './CameraCapture';
@@ -154,7 +154,9 @@ export default function CourseBuilder({
       setCourseVisibility(editingCourse.visibility || 'public');
       
       // Convert and regenerate IDs to ensure uniqueness
-      const convertedHoles: HoleInProgress[] = editingCourse.holes.map(hole => ({
+      const convertedHoles: HoleInProgress[] = (editingCourse.holes || [])
+        .filter((hole): hole is CourseHole => hole !== null && hole !== undefined)
+        .map(hole => ({
         id: hole.id,
         name: hole.name,
         par: hole.par,
@@ -340,10 +342,21 @@ export default function CourseBuilder({
         
         await updateDoc(courseRef, updateData);
 
-        // Also update visibility in public courses collection
+        // Also sync full course data to public courses collection
         const publicRef = doc(db, 'courses', editingCourse.id);
-        await updateDoc(publicRef, {
+        await setDoc(publicRef, {
+          id: editingCourse.id,
+          userId: currentUser.uid,
+          creatorUid: currentUser.uid,
+          courseName: courseName || '',
+          description: courseDescription || undefined,
+          holes: cleanedHoles,
+          headerImage: courseHeaderImage || null,
+          creatorName: currentUser.displayName || currentUser.email || 'Anonymous',
           visibility: courseVisibility,
+          status: 'published',
+          updatedAt: Timestamp.now(),
+          publishedAt: editingCourse.publishedAt || Timestamp.now(),
         }).catch(() => {
           // It's okay if this fails - course might not be in public collection yet
         });
@@ -1030,7 +1043,9 @@ export default function CourseBuilder({
                 COURSE HOLES ({holes.length})
               </h3>
 
-              {holes.map((hole, idx) => (
+              {holes
+                .filter((hole): hole is HoleInProgress => hole !== null && hole !== undefined)
+                .map((hole, idx) => (
                 <motion.div
                   key={hole.id}
                   initial={{ opacity: 0, x: -20 }}
@@ -1154,24 +1169,24 @@ export default function CourseBuilder({
                                           <div className="text-xs font-bold uppercase tracking-wider text-red-400">Error</div>
                                           <div className="text-xs text-red-400/70">{editTeeGpsError}</div>
                                           <div className="flex gap-2 mt-0.5">
-                                            <button
+                                            <div
                                               onClick={(e) => {
                                                 e.stopPropagation();
                                                 captureEditTeeLoc();
                                               }}
-                                              className="text-xs text-red-400/60 hover:text-red-400/80"
+                                              className="text-xs text-red-400/60 hover:text-red-400/80 cursor-pointer"
                                             >
                                               Retry
-                                            </button>
-                                            <button
+                                            </div>
+                                            <div
                                               onClick={(e) => {
                                                 e.stopPropagation();
                                                 setManualLocationOpen('editTee');
                                               }}
-                                              className="text-xs text-lime/60 hover:text-lime/80"
+                                              className="text-xs text-lime/60 hover:text-lime/80 cursor-pointer"
                                             >
                                               Enter Manually
-                                            </button>
+                                            </div>
                                           </div>
                                         </>
                                       ) : (
@@ -1201,16 +1216,16 @@ export default function CourseBuilder({
                                           alt="Tee"
                                           className="w-full h-full object-cover"
                                         />
-                                        <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition flex items-center justify-center">
-                                          <button
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              setEditingHoleData({ ...editingHoleData, teeImage: null });
-                                            }}
-                                            className="text-lime text-sm font-bold hover:text-lime/70"
-                                          >
+                                        <div 
+                                          className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition flex items-center justify-center cursor-pointer"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setEditingHoleData({ ...editingHoleData, teeImage: null });
+                                          }}
+                                        >
+                                          <div className="text-lime text-sm font-bold hover:text-lime/70">
                                             Change
-                                          </button>
+                                          </div>
                                         </div>
                                       </div>
                                     ) : (
@@ -1230,15 +1245,15 @@ export default function CourseBuilder({
                                             ) : editTeePhotoError ? (
                                               <>
                                                 <div className="text-xs font-bold uppercase tracking-wider text-red-400">Error</div>
-                                                <button
+                                                <div
                                                   onClick={(e) => {
                                                     e.stopPropagation();
                                                     setEditTeePhotoError(null);
                                                   }}
-                                                  className="text-xs text-red-400/60 hover:text-red-400/80 mt-0.5"
+                                                  className="text-xs text-red-400/60 hover:text-red-400/80 mt-0.5 cursor-pointer"
                                                 >
                                                   Retry
-                                                </button>
+                                                </div>
                                               </>
                                             ) : (
                                               <>
@@ -1367,24 +1382,24 @@ export default function CourseBuilder({
                                           <div className="text-xs font-bold uppercase tracking-wider text-red-400">Error</div>
                                           <div className="text-xs text-red-400/70">{editPinGpsError}</div>
                                           <div className="flex gap-2 mt-0.5">
-                                            <button
+                                            <div
                                               onClick={(e) => {
                                                 e.stopPropagation();
                                                 captureEditPinLoc();
                                               }}
-                                              className="text-xs text-red-400/60 hover:text-red-400/80"
+                                              className="text-xs text-red-400/60 hover:text-red-400/80 cursor-pointer"
                                             >
                                               Retry
-                                            </button>
-                                            <button
+                                            </div>
+                                            <div
                                               onClick={(e) => {
                                                 e.stopPropagation();
                                                 setManualLocationOpen('editPin');
                                               }}
-                                              className="text-xs text-lime/60 hover:text-lime/80"
+                                              className="text-xs text-lime/60 hover:text-lime/80 cursor-pointer"
                                             >
                                               Enter Manually
-                                            </button>
+                                            </div>
                                           </div>
                                         </>
                                       ) : (
@@ -1414,16 +1429,16 @@ export default function CourseBuilder({
                                           alt="Pin"
                                           className="w-full h-full object-cover"
                                         />
-                                        <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition flex items-center justify-center">
-                                          <button
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              setEditingHoleData({ ...editingHoleData, pinImage: null });
-                                            }}
-                                            className="text-lime text-sm font-bold hover:text-lime/70"
-                                          >
+                                        <div 
+                                          className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition flex items-center justify-center cursor-pointer"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setEditingHoleData({ ...editingHoleData, pinImage: null });
+                                          }}
+                                        >
+                                          <div className="text-lime text-sm font-bold hover:text-lime/70">
                                             Change
-                                          </button>
+                                          </div>
                                         </div>
                                       </div>
                                     ) : (
@@ -1443,15 +1458,15 @@ export default function CourseBuilder({
                                             ) : editPinPhotoError ? (
                                               <>
                                                 <div className="text-xs font-bold uppercase tracking-wider text-red-400">Error</div>
-                                                <button
+                                                <div
                                                   onClick={(e) => {
                                                     e.stopPropagation();
                                                     setEditPinPhotoError(null);
                                                   }}
-                                                  className="text-xs text-red-400/60 hover:text-red-400/80 mt-0.5"
+                                                  className="text-xs text-red-400/60 hover:text-red-400/80 mt-0.5 cursor-pointer"
                                                 >
                                                   Retry
-                                                </button>
+                                                </div>
                                               </>
                                             ) : (
                                               <>
@@ -1709,16 +1724,16 @@ export default function CourseBuilder({
                           alt="Tee"
                           className="w-full h-full object-cover"
                         />
-                        <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition flex items-center justify-center">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setCurrentHole({ ...currentHole, teeImage: null });
-                            }}
-                            className="text-lime text-sm font-bold hover:text-lime/70"
-                          >
+                        <div 
+                          className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition flex items-center justify-center cursor-pointer"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setCurrentHole({ ...currentHole, teeImage: null });
+                          }}
+                        >
+                          <div className="text-lime text-sm font-bold hover:text-lime/70">
                             Change
-                          </button>
+                          </div>
                         </div>
                       </div>
                     ) : (
@@ -1738,15 +1753,15 @@ export default function CourseBuilder({
                             ) : teePhotoError ? (
                               <>
                                 <div className="text-xs font-bold uppercase tracking-wider text-red-400">Error</div>
-                                <button
+                                <div
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     setTeePhotoError(null);
                                   }}
-                                  className="text-xs text-red-400/60 hover:text-red-400/80 mt-0.5"
+                                  className="text-xs text-red-400/60 hover:text-red-400/80 mt-0.5 cursor-pointer"
                                 >
                                   Retry
-                                </button>
+                                </div>
                               </>
                             ) : (
                               <>
@@ -1875,24 +1890,24 @@ export default function CourseBuilder({
                           <div className="text-xs font-bold uppercase tracking-wider text-red-400">Error</div>
                           <div className="text-xs text-red-400/70">{pinGpsError}</div>
                           <div className="flex gap-2 mt-0.5">
-                            <button
+                            <div
                               onClick={(e) => {
                                 e.stopPropagation();
                                 capturePinLocation();
                               }}
-                              className="text-xs text-red-400/60 hover:text-red-400/80"
+                              className="text-xs text-red-400/60 hover:text-red-400/80 cursor-pointer"
                             >
                               Retry
-                            </button>
-                            <button
+                            </div>
+                            <div
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setManualLocationOpen('pin');
                               }}
-                              className="text-xs text-lime/60 hover:text-lime/80"
+                              className="text-xs text-lime/60 hover:text-lime/80 cursor-pointer"
                             >
                               Enter Manually
-                            </button>
+                            </div>
                           </div>
                         </>
                       ) : (
@@ -1922,16 +1937,16 @@ export default function CourseBuilder({
                           alt="Pin"
                           className="w-full h-full object-cover"
                         />
-                        <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition flex items-center justify-center">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setCurrentHole({ ...currentHole, pinImage: null });
-                            }}
-                            className="text-lime text-sm font-bold hover:text-lime/70"
-                          >
+                        <div 
+                          className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition flex items-center justify-center cursor-pointer"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setCurrentHole({ ...currentHole, pinImage: null });
+                          }}
+                        >
+                          <div className="text-lime text-sm font-bold hover:text-lime/70">
                             Change
-                          </button>
+                          </div>
                         </div>
                       </div>
                     ) : (
@@ -1951,15 +1966,15 @@ export default function CourseBuilder({
                             ) : pinPhotoError ? (
                               <>
                                 <div className="text-xs font-bold uppercase tracking-wider text-red-400">Error</div>
-                                <button
+                                <div
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     setPinPhotoError(null);
                                   }}
-                                  className="text-xs text-red-400/60 hover:text-red-400/80 mt-0.5"
+                                  className="text-xs text-red-400/60 hover:text-red-400/80 mt-0.5 cursor-pointer"
                                 >
                                   Retry
-                                </button>
+                                </div>
                               </>
                             ) : (
                               <>
