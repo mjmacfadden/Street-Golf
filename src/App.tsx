@@ -30,7 +30,7 @@ export default function App() {
 }
 
 function AppContent() {
-  const { currentUser, loading } = useAuth();
+  const { currentUser, userProfile, loading } = useAuth();
   const [activeTab, setActiveTab] = useState<'home' | 'map' | 'scorecard' | 'history' | 'builder' | 'profile'>('home');
   const [showAuthModal, setShowAuthModal] = useState(() => {
     // Auto-open auth modal if redirected from PWA's "Open in Browser" fallback
@@ -720,25 +720,41 @@ function AppContent() {
         }
       };
       updatedRound.players = updatedPlayers;
+      
+      // Check if all players have scored this hole
+      const allPlayersScoredThisHole = updatedPlayers.every(p => p.scores[holeNum]);
+      
+      if (allPlayersScoredThisHole) {
+        // All players scored this hole - advance to next hole
+        if (currentHoleIdx < currentCourseHoles.length - 1) {
+          setCurrentRound(updatedRound);
+          const nextIdx = currentHoleIdx + 1;
+          setCurrentHoleIdx(nextIdx);
+          setTempScore(currentCourseHoles[nextIdx].par);
+          // Reset to first player for next hole
+          updatedRound.activePlayerIdx = 0;
+          setCurrentRound(updatedRound);
+        } else {
+          // All holes complete - go to scorecard
+          setCurrentRound(updatedRound);
+          setActiveTab('scorecard');
+        }
+      } else {
+        // Not all players scored yet - cycle to next player
+        const nextPlayerIdx = (activePlayerIdx + 1) % updatedRound.players.length;
+        updatedRound.activePlayerIdx = nextPlayerIdx;
+        setCurrentRound(updatedRound);
+        setTempScore(currentCourseHoles[currentHoleIdx].par);
+      }
     } else {
       // Single player (backward compatibility)
       updatedRound.scores = {
         ...currentRound.scores,
         [holeNum]: score
       };
-    }
-    
-    setCurrentRound(updatedRound);
-    
-    // Auto-advance to next player for multiplayer, or next hole for single player
-    if (currentRound.players && currentRound.players.length > 1) {
-      const activePlayerIdx = currentRound.activePlayerIdx ?? 0;
-      const nextPlayerIdx = (activePlayerIdx + 1) % currentRound.players.length;
-      updatedRound.activePlayerIdx = nextPlayerIdx;
       setCurrentRound(updatedRound);
-      setTempScore(currentCourseHoles[currentHoleIdx].par);
-    } else {
-      // Single player: move to next hole
+      
+      // Move to next hole or scorecard
       if (currentHoleIdx < currentCourseHoles.length - 1) {
         const nextIdx = currentHoleIdx + 1;
         setCurrentHoleIdx(nextIdx);
@@ -1452,6 +1468,7 @@ function AppContent() {
             isOpen={showAddPlayersModal}
             onClose={() => setShowAddPlayersModal(false)}
             onStart={handleStartMultiplayerRound}
+            defaultPlayerName={userProfile?.displayName || 'Player 1'}
           />
 
           {/* Delete Round Confirmation Modal */}

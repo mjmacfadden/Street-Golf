@@ -6,10 +6,11 @@ interface AddPlayersModalProps {
   isOpen: boolean;
   onClose: () => void;
   onStart: (playerNames: string[]) => void;
+  defaultPlayerName?: string;
 }
 
-export default function AddPlayersModal({ isOpen, onClose, onStart }: AddPlayersModalProps) {
-  const [players, setPlayers] = useState<string[]>(['Player 1', 'Player 2']);
+export default function AddPlayersModal({ isOpen, onClose, onStart, defaultPlayerName = 'Player 1' }: AddPlayersModalProps) {
+  const [players, setPlayers] = useState<string[]>([defaultPlayerName, 'Player 2']);
   const [newPlayerInput, setNewPlayerInput] = useState('');
 
   const addPlayer = () => {
@@ -34,7 +35,7 @@ export default function AddPlayersModal({ isOpen, onClose, onStart }: AddPlayers
   const handleStart = () => {
     if (players.length > 0 && players.every(p => p.trim())) {
       onStart(players);
-      setPlayers(['Player 1', 'Player 2']);
+      setPlayers([defaultPlayerName, 'Player 2']);
       setNewPlayerInput('');
     }
   };
