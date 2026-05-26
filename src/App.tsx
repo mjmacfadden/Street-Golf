@@ -1,4 +1,4 @@
-import { useState, useEffect, ReactNode, useRef } from 'react';
+import { useState, useEffect, ReactNode, useRef, useMemo } from 'react';
 import { APIProvider } from '@vis.gl/react-google-maps';
 import { Map as MapIcon, List as ListIcon, History as HistoryIcon, Play, ChevronLeft, ChevronRight, Pencil, Flag, Trophy, Image as ImageIcon, X, Home, Info, AlertTriangle, Hammer, LogOut, User, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -8,6 +8,7 @@ import CourseBuilder from './components/CourseBuilder';
 import { Profile } from './components/Profile';
 import HomeComponent from './components/Home';
 import AddPlayersModal from './components/AddPlayersModal';
+import RoundDetailModal from './components/RoundDetailModal';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AuthModal } from './components/AuthModal';
 import { getPublishedCourses, getUserCourses, getCourseById, saveRound, getUserRounds, deleteRound as deleteRoundFromFirestore, deleteAllIncompleteRounds } from './utils/courseService';
@@ -116,9 +117,12 @@ function AppContent() {
   const [editingCourse, setEditingCourse] = useState<FirestoreCourse | null>(null);
   const [courseRefreshTrigger, setCourseRefreshTrigger] = useState(0);
   const [showAddPlayersModal, setShowAddPlayersModal] = useState(false);
+  const [invalidSharedCourseId, setInvalidSharedCourseId] = useState<string | null>(null);
+  const [activeSharedCourseId, setActiveSharedCourseId] = useState<string | null>(null);
   
   // Track if a shared course was loaded from URL to keep it pinned to top
   const sharedCourseIdRef = useRef<string | null>(null);
+  const sharedCourseObjRef = useRef<Course | FirestoreCourse | null>(null);
   const lastLocationCaptureRef = useRef<number>(0);
   const locationCaptureTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isCapturingLocationRef = useRef(false);
@@ -297,7 +301,7 @@ function AppContent() {
   // Skip if a shared course is being displayed
   useEffect(() => {
     const delayedCapture = setTimeout(() => {
-      const shouldCapture = activeTab === 'map' ? !isCapturingLocationRef.current && !sharedCourseIdRef.current : !currentHoleIdx && !isCapturingLocationRef.current && !sharedCourseIdRef.current;
+      const shouldCapture = activeTab === 'map' ? !isCapturingLocationRef.current && !activeSharedCourseId : !currentHoleIdx && !isCapturingLocationRef.current && !activeSharedCourseId;
       if (shouldCapture) {
         console.log('📍 Capturing fresh geolocation' + (activeTab === 'map' ? ' (real-time on map)' : ' (lazy)') + '...');
         isCapturingLocationRef.current = true;
@@ -356,13 +360,13 @@ function AppContent() {
     }, 2000); // Wait 2 seconds before capturing fresh location
     
     return () => clearTimeout(delayedCapture);
-  }, [currentHoleIdx, activeTab]);
+  }, [currentHoleIdx, activeTab, activeSharedCourseId]);
 
   // Capture user location when map view is opened (with smart caching)
   // Skip if a shared course is being displayed
   // Only captures once per map view session (unless location was captured on app load)
   useEffect(() => {
-    const isMapViewActive = activeTab === 'map' && currentHoleIdx === null && !sharedCourseIdRef.current;
+    const isMapViewActive = activeTab === 'map' && currentHoleIdx === null && !activeSharedCourseId;
     
     // Detect when entering map view for a new session
     if (isMapViewActive && !lastMapTabRef.current) {
@@ -424,18 +428,18 @@ function AppContent() {
   // Sort courses by distance when location becomes available
   // But only if a shared course is NOT being displayed
   useEffect(() => {
-    if (userLocation && availableCourses.length > 0 && !sharedCourseIdRef.current) {
+    if (userLocation && availableCourses.length > 0 && !activeSharedCourseId) {
       console.log('🎯 Sorting courses by distance from user location...');
       const sorted = sortCoursesByDistance(availableCourses, userLocation.lat, userLocation.lng);
       setSortedCourses(sorted);
     }
-  }, [userLocation, availableCourses]);
+  }, [userLocation, availableCourses, activeSharedCourseId]);
 
   // Clear shared course tracking when user leaves home or starts a round
   // Keep location on map even when viewing a specific hole
   useEffect(() => {
     if (activeTab !== 'home' || currentHoleIdx !== null) {
-      sharedCourseIdRef.current = null;
+      setActiveSharedCourseId(null);
     }
     
     // Only clear location when leaving map view, not when viewing a hole on map
@@ -480,12 +484,15 @@ function AppContent() {
       const params = new URLSearchParams(window.location.search);
       const sharedCourseId = params.get('c');
       
-      if (!sharedCourseId) return;
+      if (!sharedCourseId) {
+        sharedCourseObjRef.current = null;
+        return;
+      }
       
       // First check if it's already in availableCourses
       let sharedCourse = availableCourses.find(c => c.id === sharedCourseId);
       
-      // If not found, try to load it directly
+      // If not found in available courses, try to load it directly
       if (!sharedCourse && availableCourses.length > 0) {
         try {
           console.log('📍 Shared course not in available courses, attempting to load:', sharedCourseId);
@@ -494,30 +501,47 @@ function AppContent() {
             sharedCourse = convertFirestoreCourse(firestoreCourse);
             console.log('📍 Loaded shared course directly:', sharedCourse.name);
             
-            // Track this shared course to keep it pinned to top
-            sharedCourseIdRef.current = sharedCourseId;
+            // Store the shared course object for later use
+            sharedCourseObjRef.current = sharedCourse;
             
-            // Add to availableCourses so it displays in the carousel
+            // Add to beginning of availableCourses so it shows as the first course in carousel
             setAvailableCourses(prev => {
               if (!prev.find(c => c.id === sharedCourseId)) {
-                // Add to beginning so it shows as the first course in carousel
                 return [sharedCourse, ...prev];
               }
               return prev;
             });
+          } else {
+            // Course not found in Firestore
+            console.warn('❌ Shared course not found in Firestore:', sharedCourseId);
+            setInvalidSharedCourseId(sharedCourseId);
+            sharedCourseObjRef.current = null;
+            return;
           }
         } catch (err) {
           console.warn('❌ Failed to load shared course:', err);
+          setInvalidSharedCourseId(sharedCourseId);
+          sharedCourseObjRef.current = null;
           return;
         }
+      } else if (sharedCourse) {
+        // Shared course already in available courses
+        sharedCourseObjRef.current = sharedCourse;
       }
       
       if (sharedCourse) {
         console.log('📍 Shared course found, switching to home view:', sharedCourse.name);
         setSelectedCourse(sharedCourse);
+        setActiveSharedCourseId(sharedCourseId); // Trigger re-render with shared course at front
         setActiveTab('home');
-      } else {
+        // Clear any previous invalid course error
+        setInvalidSharedCourseId(null);
+      } else if (sharedCourseId && !sharedCourse) {
+        // Course was provided but couldn't be loaded
         console.warn('⚠️ Shared course not found:', sharedCourseId);
+        setInvalidSharedCourseId(sharedCourseId);
+        setActiveSharedCourseId(null); // Clear shared course
+        sharedCourseObjRef.current = null;
       }
     };
     
@@ -525,7 +549,7 @@ function AppContent() {
     if (availableCourses.length > 0 && !coursesLoading) {
       loadSharedCourse();
     }
-  }, [availableCourses, coursesLoading]);
+  }, [coursesLoading]);
 
   // Load persistence (Firestore for logged-in users, localStorage for guests only)
   useEffect(() => {
@@ -896,6 +920,20 @@ function AppContent() {
     );
   }
 
+  // Memoize the courses array passed to HomeComponent to prevent carousel reset
+  // This must be called before the loading check to maintain consistent hook order
+  const homeComponentCourses = useMemo(() => 
+    activeSharedCourseId && sharedCourseObjRef.current
+      ? (() => {
+          // Use the stored shared course object and put it at front with all other courses
+          const shared = sharedCourseObjRef.current;
+          const others = availableCourses.filter(c => c.id !== activeSharedCourseId);
+          return [shared, ...others];
+        })()
+      : (userLocation ? sortedCourses : availableCourses),
+    [activeSharedCourseId, availableCourses, userLocation, sortedCourses]
+  );
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-dark">
@@ -921,11 +959,8 @@ function AppContent() {
                 className="h-full w-full"
               >
                 <HomeComponent
-                  courses={sharedCourseIdRef.current 
-                    ? availableCourses.filter(c => c.id === sharedCourseIdRef.current)
-                    : (userLocation ? sortedCourses : availableCourses)
-                  }
-                  userLocation={sharedCourseIdRef.current ? null : userLocation}
+                  courses={homeComponentCourses}
+                  userLocation={userLocation}
                   onSelectCourse={(course) => {
                     setSelectedCourse(course);
                     setCurrentHoleIdx(null);
@@ -1107,28 +1142,27 @@ function AppContent() {
                                     +
                                   </button>
                                   {currentRound?.players && currentRound.players.length > 1 && (
-                                    <div className="ml-auto flex items-center gap-2">
-                                      <button 
-                                        onClick={() => {
-                                          const prevPlayerIdx = ((currentRound.activePlayerIdx ?? 0) - 1 + currentRound.players!.length) % currentRound.players!.length;
-                                          setCurrentRound({ ...currentRound, activePlayerIdx: prevPlayerIdx });
-                                          if (currentHoleIdx !== null) {
-                                            setTempScore(currentCourseHoles[currentHoleIdx].par);
-                                          }
-                                        }}
-                                        className="p-1 text-slate-400 hover:text-lime transition-colors"
-                                      >
-                                        <ChevronLeft size={18} />
-                                      </button>
-                                      <div className="text-xs font-bold uppercase tracking-tight text-slate-200 whitespace-nowrap px-2">
-                                        {currentRound.players[currentRound.activePlayerIdx ?? 0]?.name}
+                                    <div className="ml-auto overflow-x-auto scrollbar-hide">
+                                      <div className="flex gap-2 pb-2">
+                                        {currentRound.players.map((player, idx) => (
+                                          <button
+                                            key={player.id}
+                                            onClick={() => {
+                                              setCurrentRound({ ...currentRound, activePlayerIdx: idx });
+                                              if (currentHoleIdx !== null) {
+                                                setTempScore(currentCourseHoles[currentHoleIdx].par);
+                                              }
+                                            }}
+                                            className={`px-3 py-1 rounded-lg font-bold text-xs uppercase tracking-tight whitespace-nowrap transition-colors ${
+                                              idx === (currentRound.activePlayerIdx ?? 0)
+                                                ? 'bg-lime text-dark'
+                                                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                                            }`}
+                                          >
+                                            {player.name}
+                                          </button>
+                                        ))}
                                       </div>
-                                      <button 
-                                        onClick={switchToNextPlayer}
-                                        className="p-1 text-slate-400 hover:text-lime transition-colors"
-                                      >
-                                        <ChevronRight size={18} />
-                                      </button>
                                     </div>
                                   )}
                                 </div>
@@ -1200,6 +1234,18 @@ function AppContent() {
                     {history.map(round => {
                       const roundCourse = availableCourses.find(c => c.id === round.courseId);
                       const courseName = round.courseName || roundCourse?.name || 'Unknown Course';
+                      
+                      // Get scores from first player (for multiplayer) or main scores (for single player)
+                      const getFirstPlayerScores = () => {
+                        if (round.players && round.players.length > 0) {
+                          return round.players[0]?.scores || {};
+                        }
+                        return round.scores;
+                      };
+                      
+                      const firstPlayerScores = getFirstPlayerScores();
+                      const totalStrokes = Object.values(firstPlayerScores).reduce((a: number, b: any) => a + b.strokes, 0);
+                      
                       return (<div key={round.id} className="bg-navy/50 p-5 rounded-2xl border border-white/5 backdrop-blur-sm transition-all hover:border-lime/30">
                         <div className="flex justify-between items-center mb-3">
                           <div>
@@ -1211,7 +1257,7 @@ function AppContent() {
                         <div className="flex justify-between items-center">
                           <div>
                             <p className="text-4xl font-[1000] italic leading-none tracking-tighter">
-                              {(Object.values(round.scores) as Score[]).reduce((a, b) => a + b.strokes, 0)}
+                              {totalStrokes}
                             </p>
                             <p className="text-[10px] uppercase text-slate-500 font-black mt-1">Total strokes</p>
                           </div>
@@ -1412,67 +1458,11 @@ function AppContent() {
 
           {/* Round Detail Modal */}
           {selectedHistoryRound && (
-            <div
-              onClick={() => setSelectedHistoryRound(null)}
-              className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-xl flex items-center justify-center p-6"
-            >
-              <div
-                onClick={(e) => e.stopPropagation()}
-                className="w-full max-w-md bg-navy/80 rounded-3xl overflow-hidden shadow-2xl border border-slate-700 max-h-[80vh] overflow-y-auto"
-              >
-                <div className="p-6">
-                  <div className="flex items-center justify-between mb-6">
-                    <div>
-                      <h3 className="text-2xl font-black text-lime uppercase italic tracking-tight">Round Details</h3>
-                      <p className="text-xs text-slate-400 mt-1">{new Date(selectedHistoryRound.date).toLocaleDateString()}</p>
-                      {selectedHistoryRound.courseName && (
-                        <p className="text-xs text-slate-500 mt-1">{selectedHistoryRound.courseName}</p>
-                      )}
-                    </div>
-                    <button 
-                      onClick={() => setSelectedHistoryRound(null)}
-                      className="p-2 hover:bg-white/10 rounded-lg"
-                    >
-                      <X size={20} />
-                    </button>
-                  </div>
-
-                  <div className="space-y-3">
-                    {(() => {
-                      const roundCourse = availableCourses.find(c => c.id === selectedHistoryRound.courseId) || availableCourses[0];
-                      return (roundCourse.holes || [])
-                        .filter((hole): hole is typeof roundCourse.holes[0] => hole !== null && hole !== undefined)
-                        .map((hole) => {
-                        const score = selectedHistoryRound.scores[hole.number];
-                        return (
-                          <div 
-                            key={hole.number}
-                            className="flex items-center justify-between p-3 bg-slate-950/50 rounded-xl border border-white/5"
-                          >
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-lg bg-lime text-dark flex items-center justify-center text-xs font-black italic">
-                                {hole.number}
-                              </div>
-                              <div>
-                                <p className="font-bold text-sm">{hole.name}</p>
-                                <p className="text-[10px] text-slate-500">Par {hole.par}</p>
-                              </div>
-                            </div>
-                            {score ? (
-                              <p className={`text-lg font-[1000] italic ${score.strokes < hole.par ? 'text-lime' : score.strokes > hole.par ? 'text-red-500' : ''}`}>
-                                {score.strokes}
-                              </p>
-                            ) : (
-                              <p className="text-slate-600 font-bold">-</p>
-                            )}
-                          </div>
-                        );
-                      });
-                    })()}
-                  </div>
-                </div>
-              </div>
-            </div>
+            <RoundDetailModal
+              round={selectedHistoryRound}
+              courses={availableCourses}
+              onClose={() => setSelectedHistoryRound(null)}
+            />
           )}
 
           {/* Add Players Modal */}
@@ -1676,6 +1666,41 @@ function AppContent() {
                       Try Again
                     </button>
                   </div>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Invalid Shared Course Modal */}
+        <AnimatePresence>
+          {invalidSharedCourseId && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setInvalidSharedCourseId(null)}
+              className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+            >
+              <motion.div
+                onClick={(e) => e.stopPropagation()}
+                className="bg-navy/90 rounded-2xl p-6 max-w-sm border border-red-500/30 shadow-2xl"
+              >
+                <div className="text-center">
+                  <div className="text-4xl mb-4">⚠️</div>
+                  <h3 className="text-xl font-black text-red-400 uppercase italic tracking-tight mb-2">
+                    Invalid Course ID
+                  </h3>
+                  <p className="text-slate-300 text-sm mb-6">
+                    The course ID "<span className="text-lime font-bold">{invalidSharedCourseId}</span>" could not be found. 
+                    It may have been deleted or the link may be incorrect.
+                  </p>
+                  <button
+                    onClick={() => setInvalidSharedCourseId(null)}
+                    className="w-full px-4 py-2 bg-lime text-dark rounded-lg font-bold hover:bg-lime/90 transition-colors"
+                  >
+                    Go to Home
+                  </button>
                 </div>
               </motion.div>
             </motion.div>

@@ -33,8 +33,8 @@ export default function Scorecard({ round, holes, onFinishRound, onViewHole }: S
     return { totalStrokes, totalPar, diff, scoredHoles };
   };
 
-  // Get current player's scores
-  const currentPlayerScores = isMultiplayer 
+  // Get current player's scores (use players array if available, even for single-player)
+  const currentPlayerScores = round.players && round.players.length > 0
     ? getScoresForPlayer(activePlayerIdx) 
     : round.scores;
   
