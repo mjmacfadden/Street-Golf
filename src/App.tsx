@@ -1007,11 +1007,6 @@ function AppContent() {
                               <p className="text-[10px] text-lime font-black uppercase tracking-wider italic">
                                  PAR {currentCourseHoles[currentHoleIdx].par}
                               </p>
-                              {currentRound?.players && currentRound.players.length > 0 && (
-                                <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider italic">
-                                  • {currentRound.players[currentRound.activePlayerIdx ?? 0]?.name}
-                                </p>
-                              )}
                             </div>
                           </div>
                         </div>
@@ -1112,12 +1107,29 @@ function AppContent() {
                                     +
                                   </button>
                                   {currentRound?.players && currentRound.players.length > 1 && (
-                                    <button 
-                                      onClick={switchToNextPlayer}
-                                      className="ml-auto text-xs px-2 py-1 rounded bg-slate-700/50 hover:bg-slate-600/50 text-slate-200 font-bold uppercase tracking-tight"
-                                    >
-                                      Next Player
-                                    </button>
+                                    <div className="ml-auto flex items-center gap-2">
+                                      <button 
+                                        onClick={() => {
+                                          const prevPlayerIdx = ((currentRound.activePlayerIdx ?? 0) - 1 + currentRound.players!.length) % currentRound.players!.length;
+                                          setCurrentRound({ ...currentRound, activePlayerIdx: prevPlayerIdx });
+                                          if (currentHoleIdx !== null) {
+                                            setTempScore(currentCourseHoles[currentHoleIdx].par);
+                                          }
+                                        }}
+                                        className="p-1 text-slate-400 hover:text-lime transition-colors"
+                                      >
+                                        <ChevronLeft size={18} />
+                                      </button>
+                                      <div className="text-xs font-bold uppercase tracking-tight text-slate-200 whitespace-nowrap px-2">
+                                        {currentRound.players[currentRound.activePlayerIdx ?? 0]?.name}
+                                      </div>
+                                      <button 
+                                        onClick={switchToNextPlayer}
+                                        className="p-1 text-slate-400 hover:text-lime transition-colors"
+                                      >
+                                        <ChevronRight size={18} />
+                                      </button>
+                                    </div>
                                   )}
                                 </div>
                                 <button 
