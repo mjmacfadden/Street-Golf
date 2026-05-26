@@ -259,13 +259,15 @@ function AppContent() {
     }
   }, [currentUser, loading, courseRefreshTrigger]);
 
-  // Capture fresh location lazily in background (don't update state to avoid visual refresh)
-  // Just cache it for next app load and silently update sorted courses if location changed significantly
-  // But skip if a shared course is being displayed
+  // Capture fresh location continuously on map, lazily in background elsewhere
+  // On map: real-time updates every 2 seconds
+  // Elsewhere: update silently if location changed significantly
+  // Skip if a shared course is being displayed
   useEffect(() => {
     const delayedCapture = setTimeout(() => {
-      if (!currentHoleIdx && !isCapturingLocationRef.current && !sharedCourseIdRef.current) {
-        console.log('📍 Capturing fresh geolocation in background (lazy)...');
+      const shouldCapture = activeTab === 'map' ? !isCapturingLocationRef.current && !sharedCourseIdRef.current : !currentHoleIdx && !isCapturingLocationRef.current && !sharedCourseIdRef.current;
+      if (shouldCapture) {
+        console.log('📍 Capturing fresh geolocation' + (activeTab === 'map' ? ' (real-time on map)' : ' (lazy)') + '...');
         isCapturingLocationRef.current = true;
         
         const captureLocation = async () => {
@@ -279,9 +281,13 @@ function AppContent() {
             localStorage.setItem('userLocation', JSON.stringify(freshLocation));
             lastLocationCaptureRef.current = Date.now();
             
-            // Only update UI if location changed significantly (more than ~100m)
-            // This avoids unnecessary re-renders when location hasn't changed
-            if (userLocation) {
+            // Always update location on map view (real-time tracking)
+            // On other views, only update if location changed significantly
+            if (activeTab === 'map') {
+              console.log('📍 Location updated (real-time on map):', freshLocation);
+              setUserLocation(freshLocation);
+              setShowLocationRetryPrompt(false);
+            } else if (userLocation) {
               const distance = calculateDistance(
                 userLocation.lat,
                 userLocation.lng,
@@ -318,7 +324,7 @@ function AppContent() {
     }, 2000); // Wait 2 seconds before capturing fresh location
     
     return () => clearTimeout(delayedCapture);
-  }, [currentHoleIdx]);
+  }, [currentHoleIdx, activeTab]);
 
   // Capture user location when map view is opened (with smart caching)
   // Skip if a shared course is being displayed
@@ -393,13 +399,15 @@ function AppContent() {
     }
   }, [userLocation, availableCourses]);
 
-  // Clear shared course tracking and location when user leaves home or starts a round
+  // Clear shared course tracking when user leaves home or starts a round
+  // Keep location on map even when viewing a specific hole
   useEffect(() => {
     if (activeTab !== 'home' || currentHoleIdx !== null) {
       sharedCourseIdRef.current = null;
     }
     
-    if (currentHoleIdx !== null) {
+    // Only clear location when leaving map view, not when viewing a hole on map
+    if (activeTab !== 'map' && currentHoleIdx !== null) {
       setUserLocation(null);
       setLocationError(null);
     }

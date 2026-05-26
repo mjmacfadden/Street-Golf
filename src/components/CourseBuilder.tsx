@@ -232,6 +232,17 @@ export default function CourseBuilder({
   };
 
   const editHole = (hole: HoleInProgress) => {
+    // Apply any pending edits from the current hole before switching
+    if (editingHoleId && editingHoleData) {
+      const updatedHoles = holes
+        .filter((h): h is HoleInProgress => h !== null && h !== undefined)
+        .map(h => 
+          h.id === editingHoleId ? { ...h, ...editingHoleData } : h
+        );
+      setHoles(updatedHoles);
+    }
+    
+    // Now load the new hole for editing
     setEditingHoleId(hole.id);
     setExpandedHole(hole.id);
     setEditingHoleData({
@@ -248,16 +259,20 @@ export default function CourseBuilder({
     });
   };
 
-  const applyPendingHoleEdits = () => {
-    // Apply any pending hole edits to the holes array
+  const applyPendingHoleEdits = (holesList = holes) => {
+    // Apply any pending hole edits to the holes array and return updated array
     if (editingHoleId && editingHoleData) {
-      const updatedHoles = holes.map(hole => 
-        hole.id === editingHoleId ? { ...hole, ...editingHoleData } : hole
-      );
+      const updatedHoles = holesList
+        .filter((hole): hole is HoleInProgress => hole !== null && hole !== undefined)
+        .map(hole => 
+          hole.id === editingHoleId ? { ...hole, ...editingHoleData } : hole
+        );
       setHoles(updatedHoles);
       setEditingHoleId(null);
       setEditingHoleData(null);
+      return updatedHoles;
     }
+    return holesList;
   };
 
   const cancelHoleEdit = () => {
@@ -275,7 +290,7 @@ export default function CourseBuilder({
   };
 
   const removeHole = (id: string) => {
-    setHoles(holes.filter(h => h.id !== id));
+    setHoles(holes.filter(h => h !== null && h !== undefined && h.id !== id));
     if (editingHoleId === id) {
       cancelHoleEdit();
     }
@@ -306,23 +321,25 @@ export default function CourseBuilder({
         // Update existing course
         const courseRef = doc(db, 'users', currentUser.uid, 'courses', editingCourse.id);
         
-        // Apply any pending hole edits first
-        applyPendingHoleEdits();
+        // Apply any pending hole edits and get updated holes
+        const updatedHolesFromEdits = applyPendingHoleEdits();
         
         // Clean holes array - reconstruct each hole with only expected fields
-        const cleanedHoles = holes.map(hole => ({
-          id: hole.id || '',
-          name: hole.name || '',
-          par: hole.par || 3,
-          teeLocation: hole.teeLocation || null,
-          pinLocation: hole.pinLocation || null,
-          teeImage: hole.teeImage || null,
-          pinImage: hole.pinImage || null,
-          teeDescription: hole.teeDescription || '',
-          pinDescription: hole.pinDescription || '',
-          tip: hole.tip || '',
-          hazard: hole.hazard === true,
-        }));
+        const cleanedHoles = updatedHolesFromEdits
+          .filter((hole): hole is HoleInProgress => hole !== null && hole !== undefined)
+          .map(hole => ({
+            id: hole.id || '',
+            name: hole.name || '',
+            par: hole.par || 3,
+            teeLocation: hole.teeLocation || null,
+            pinLocation: hole.pinLocation || null,
+            teeImage: hole.teeImage || null,
+            pinImage: hole.pinImage || null,
+            teeDescription: hole.teeDescription || '',
+            pinDescription: hole.pinDescription || '',
+            tip: hole.tip || '',
+            hazard: hole.hazard === true,
+          }));
         
         // Build update object, removing any undefined values
         const updateData: any = {
@@ -365,42 +382,30 @@ export default function CourseBuilder({
         setTimeout(() => {
           onEditComplete?.();
           onCourseSaved?.();
-          setCourseName('');
-          setHoles([]);
-          setCurrentHole({
-            name: '',
-            par: 3,
-            teeLocation: null,
-            pinLocation: null,
-            teeDescription: '',
-            pinDescription: '',
-            teeImage: null,
-            pinImage: null,
-            tip: '',
-            hazard: false,
-          });
-          setCourseHeaderImage(null);
+          // Keep course data when editing; only clear when creating new
           setPublishSuccess(false);
         }, 2000);
       } else {
         // Create new course
-        // Apply any pending hole edits first
-        applyPendingHoleEdits();
+        // Apply any pending hole edits and get updated holes
+        const updatedHolesFromEdits = applyPendingHoleEdits();
         
         // Clean holes array - reconstruct each hole with only expected fields
-        const cleanedHoles = holes.map(hole => ({
-          id: hole.id || '',
-          name: hole.name || '',
-          par: hole.par || 3,
-          teeLocation: hole.teeLocation || null,
-          pinLocation: hole.pinLocation || null,
-          teeImage: hole.teeImage || null,
-          pinImage: hole.pinImage || null,
-          teeDescription: hole.teeDescription || '',
-          pinDescription: hole.pinDescription || '',
-          tip: hole.tip || '',
-          hazard: hole.hazard === true,
-        }));
+        const cleanedHoles = updatedHolesFromEdits
+          .filter((hole): hole is HoleInProgress => hole !== null && hole !== undefined)
+          .map(hole => ({
+            id: hole.id || '',
+            name: hole.name || '',
+            par: hole.par || 3,
+            teeLocation: hole.teeLocation || null,
+            pinLocation: hole.pinLocation || null,
+            teeImage: hole.teeImage || null,
+            pinImage: hole.pinImage || null,
+            teeDescription: hole.teeDescription || '',
+            pinDescription: hole.pinDescription || '',
+            tip: hole.tip || '',
+            hazard: hole.hazard === true,
+          }));
         
         const courseId = await saveCourse(currentUser.uid, {
           courseName: courseName || '',
@@ -1054,10 +1059,9 @@ export default function CourseBuilder({
                   className="bg-white/5 border border-white/10 rounded-xl p-4 backdrop-blur-sm cursor-pointer hover:border-lime/30 hover:bg-white/10 transition"
                   onClick={() => {
                     if (expandedHole === hole.id) {
-                      // Already expanded, close it
+                      // Already expanded, apply edits and close it
+                      applyPendingHoleEdits();
                       setExpandedHole(null);
-                      setEditingHoleId(null);
-                      setEditingHoleData(null);
                     } else {
                       // Not expanded, open it in edit mode
                       editHole(hole);
@@ -1088,7 +1092,7 @@ export default function CourseBuilder({
 
                   {/* Expanded Details or Edit Form */}
                   <AnimatePresence>
-                    {expandedHole === hole.id && (
+                    {expandedHole === hole.id && editingHoleData && (
                       <motion.div
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: 'auto' }}
@@ -1574,14 +1578,15 @@ export default function CourseBuilder({
                               </div>
                             </div>
 
-                            {/* Cancel Button */}
-                            <div className="flex gap-2">
+                            {/* Discard Button */}
+                            <div>
                               <button
                                 onClick={cancelHoleEdit}
                                 className="w-full px-3 py-2 bg-white/10 text-white font-bold text-xs rounded-lg hover:bg-white/20 transition"
                               >
                                 Discard Changes
                               </button>
+                              <p className="text-xs text-white/60 mt-2 text-center">Click Update Course to save all changes</p>
                             </div>
                           </div>
                       </motion.div>
