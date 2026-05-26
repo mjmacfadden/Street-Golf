@@ -966,6 +966,11 @@ function AppContent() {
                     setCurrentHoleIdx(null);
                   }}
                   onPlayNow={() => {
+                    // Clear URL parameter and shared course state when playing a different course
+                    if (activeSharedCourseId) {
+                      window.history.replaceState({}, '', window.location.pathname);
+                      setActiveSharedCourseId(null);
+                    }
                     startNewRound();
                   }}
                   loading={coursesLoading}

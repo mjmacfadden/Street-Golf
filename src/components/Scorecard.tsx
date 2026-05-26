@@ -50,6 +50,13 @@ export default function Scorecard({ round, holes, onFinishRound, onViewHole }: S
     }
   }, [currentPlayerScores, holes]);
 
+  // Show first player's score when round is completed
+  useEffect(() => {
+    if (round.isCompleted && activePlayerIdx !== 0) {
+      setActivePlayerIdx(0);
+    }
+  }, [round.isCompleted]);
+
   const currentPlayer = isMultiplayer ? round.players![activePlayerIdx] : null;
 
   return (
