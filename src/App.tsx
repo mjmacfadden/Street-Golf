@@ -7,6 +7,7 @@ import Scorecard from './components/Scorecard';
 import CourseBuilder from './components/CourseBuilder';
 import { Profile } from './components/Profile';
 import HomeComponent from './components/Home';
+import AddPlayersModal from './components/AddPlayersModal';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AuthModal } from './components/AuthModal';
 import { getPublishedCourses, getUserCourses, getCourseById, saveRound, getUserRounds, deleteRound as deleteRoundFromFirestore, deleteAllIncompleteRounds } from './utils/courseService';
@@ -114,6 +115,7 @@ function AppContent() {
   const [deleteConfirmRound, setDeleteConfirmRound] = useState<string | null>(null);
   const [editingCourse, setEditingCourse] = useState<FirestoreCourse | null>(null);
   const [courseRefreshTrigger, setCourseRefreshTrigger] = useState(0);
+  const [showAddPlayersModal, setShowAddPlayersModal] = useState(false);
   
   // Track if a shared course was loaded from URL to keep it pinned to top
   const sharedCourseIdRef = useRef<string | null>(null);
@@ -129,15 +131,45 @@ function AppContent() {
   const getFirstUnscoredHoleIndex = (round: Round | null, holes: typeof currentCourseHoles): number | null => {
     if (!round) return null;
     
+    // For multiplayer, check the active player's scores
+    let scoresToCheck = round.scores;
+    if (round.players && round.players.length > 0) {
+      const activePlayerIdx = round.activePlayerIdx ?? 0;
+      scoresToCheck = round.players[activePlayerIdx]?.scores || {};
+    }
+    
     for (let i = 0; i < holes.length; i++) {
       const holeNumber = holes[i].number;
-      if (!round.scores[holeNumber]) {
+      if (!scoresToCheck[holeNumber]) {
         return i;
       }
     }
     
     // All holes scored - round is complete
     return null;
+  };
+
+  // Helper: Get current player's scores (multiplayer support)
+  const getCurrentPlayerScores = (round: Round | null) => {
+    if (!round) return {};
+    
+    if (round.players && round.players.length > 0) {
+      const activePlayerIdx = round.activePlayerIdx ?? 0;
+      return round.players[activePlayerIdx]?.scores || {};
+    }
+    
+    return round.scores;
+  };
+
+  // Helper: Switch to next player
+  const switchToNextPlayer = () => {
+    if (!currentRound?.players || currentRound.players.length <= 1) return;
+    
+    const nextPlayerIdx = ((currentRound.activePlayerIdx ?? 0) + 1) % currentRound.players.length;
+    setCurrentRound({ ...currentRound, activePlayerIdx: nextPlayerIdx });
+    if (currentHoleIdx !== null) {
+      setTempScore(currentCourseHoles[currentHoleIdx].par);
+    }
   };
 
   // Convert Firestore course to local Course format
@@ -607,7 +639,18 @@ function AppContent() {
       return;
     }
     
-    console.log('🎯 Starting new round with selectedCourse:', selectedCourse);
+    // Show players modal to start multiplayer round
+    setShowAddPlayersModal(true);
+  };
+
+  const handleStartMultiplayerRound = async (playerNames: string[]) => {
+    if (!selectedCourse) {
+      console.warn('⚠️ Cannot start round: no course selected');
+      return;
+    }
+    
+    setShowAddPlayersModal(false);
+    console.log('🎯 Starting multiplayer round with players:', playerNames);
     
     // Clean up any existing incomplete rounds first
     if (currentUser?.uid) {
@@ -623,20 +666,34 @@ function AppContent() {
     const roundCourseName = selectedCourse.name || 'Unknown Course';
     const roundCourseId = selectedCourse.id;
     
+    // Create players with empty scores
+    const players = playerNames.map((name, idx) => ({
+      id: `player_${idx}_${Date.now()}`,
+      name,
+      scores: {}
+    }));
+    
     const newRound: Round = {
       id: Date.now().toString(),
       date: new Date().toISOString(),
-      scores: {},
+      scores: {}, // Keep for backward compatibility
+      players,
+      activePlayerIdx: 0,
       isCompleted: false,
       courseId: roundCourseId,
-      courseName: roundCourseName  // Explicitly capture at round creation
+      courseName: roundCourseName
     };
     
-    console.log('📝 Created new round:', { id: newRound.id, courseName: newRound.courseName, courseId: newRound.courseId });
+    console.log('📝 Created multiplayer round:', { 
+      id: newRound.id, 
+      courseName: newRound.courseName, 
+      players: players.map(p => p.name) 
+    });
+    
     setCurrentRound(newRound);
     setCurrentHoleIdx(null);
     setActiveTab('map');
-    // Wait 1.5 seconds then zoom to hole 1 over 2 seconds
+    // Wait 1.5 seconds then zoom to hole 1
     setTimeout(() => {
       setCurrentHoleIdx(0);
       setTempScore(currentCourseHoles[0].par);
@@ -647,20 +704,48 @@ function AppContent() {
     if (!currentRound || currentHoleIdx === null) return;
     
     const holeNum = currentCourseHoles[currentHoleIdx].number;
-    const newScores = {
-      ...currentRound.scores,
-      [holeNum]: { strokes: tempScore }
-    };
+    const score = { strokes: tempScore };
     
-    setCurrentRound({ ...currentRound, scores: newScores });
+    let updatedRound = { ...currentRound };
     
-    // Move to next hole or scorecard if finished
-    if (currentHoleIdx < currentCourseHoles.length - 1) {
-      const nextIdx = currentHoleIdx + 1;
-      setCurrentHoleIdx(nextIdx);
-      setTempScore(currentCourseHoles[nextIdx].par);
+    // Handle multiplayer
+    if (currentRound.players && currentRound.players.length > 0) {
+      const activePlayerIdx = currentRound.activePlayerIdx ?? 0;
+      const updatedPlayers = [...currentRound.players];
+      updatedPlayers[activePlayerIdx] = {
+        ...updatedPlayers[activePlayerIdx],
+        scores: {
+          ...updatedPlayers[activePlayerIdx].scores,
+          [holeNum]: score
+        }
+      };
+      updatedRound.players = updatedPlayers;
     } else {
-      setActiveTab('scorecard');
+      // Single player (backward compatibility)
+      updatedRound.scores = {
+        ...currentRound.scores,
+        [holeNum]: score
+      };
+    }
+    
+    setCurrentRound(updatedRound);
+    
+    // Auto-advance to next player for multiplayer, or next hole for single player
+    if (currentRound.players && currentRound.players.length > 1) {
+      const activePlayerIdx = currentRound.activePlayerIdx ?? 0;
+      const nextPlayerIdx = (activePlayerIdx + 1) % currentRound.players.length;
+      updatedRound.activePlayerIdx = nextPlayerIdx;
+      setCurrentRound(updatedRound);
+      setTempScore(currentCourseHoles[currentHoleIdx].par);
+    } else {
+      // Single player: move to next hole
+      if (currentHoleIdx < currentCourseHoles.length - 1) {
+        const nextIdx = currentHoleIdx + 1;
+        setCurrentHoleIdx(nextIdx);
+        setTempScore(currentCourseHoles[nextIdx].par);
+      } else {
+        setActiveTab('scorecard');
+      }
     }
   };
 
@@ -885,11 +970,11 @@ function AppContent() {
                       <div 
                         className="p-4 flex items-center justify-between bg-navy/50"
                       >
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-3 flex-1">
                           <div className="w-8 h-8 rounded-full bg-lime text-dark flex items-center justify-center font-black text-sm italic">
                             {currentCourseHoles[currentHoleIdx].number}
                           </div>
-                          <div>
+                          <div className="flex-1">
                             <div className="flex items-center gap-2">
                               <h3 className="font-black text-sm leading-none uppercase italic tracking-tight">{currentCourseHoles[currentHoleIdx].name}</h3>
                               <button 
@@ -902,9 +987,16 @@ function AppContent() {
                                 <AlertTriangle size={14} className="text-white" />
                               )}
                             </div>
-                            <p className="text-[10px] text-lime font-black uppercase mt-1 tracking-wider inline-flex items-center gap-2 italic">
-                               PAR {currentCourseHoles[currentHoleIdx].par}
-                            </p>
+                            <div className="flex gap-2 items-center mt-1">
+                              <p className="text-[10px] text-lime font-black uppercase tracking-wider italic">
+                                 PAR {currentCourseHoles[currentHoleIdx].par}
+                              </p>
+                              {currentRound?.players && currentRound.players.length > 0 && (
+                                <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider italic">
+                                  • {currentRound.players[currentRound.activePlayerIdx ?? 0]?.name}
+                                </p>
+                              )}
+                            </div>
                           </div>
                         </div>
                         <div className="flex items-center gap-4">
@@ -1003,6 +1095,14 @@ function AppContent() {
                                   >
                                     +
                                   </button>
+                                  {currentRound?.players && currentRound.players.length > 1 && (
+                                    <button 
+                                      onClick={switchToNextPlayer}
+                                      className="ml-auto text-xs px-2 py-1 rounded bg-slate-700/50 hover:bg-slate-600/50 text-slate-200 font-bold uppercase tracking-tight"
+                                    >
+                                      Next Player
+                                    </button>
+                                  )}
                                 </div>
                                 <button 
                                   onClick={handleSaveScore}
@@ -1346,6 +1446,13 @@ function AppContent() {
               </div>
             </div>
           )}
+
+          {/* Add Players Modal */}
+          <AddPlayersModal 
+            isOpen={showAddPlayersModal}
+            onClose={() => setShowAddPlayersModal(false)}
+            onStart={handleStartMultiplayerRound}
+          />
 
           {/* Delete Round Confirmation Modal */}
           {deleteConfirmRound && (

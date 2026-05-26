@@ -1,6 +1,6 @@
-import { useEffect, useRef } from 'react';
-import { Hole, Round } from '../types';
-import { Trophy, Clock, MapPin } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Hole, Round, Player } from '../types';
+import { Trophy, Clock, MapPin, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface ScorecardProps {
   round: Round;
@@ -11,27 +11,53 @@ interface ScorecardProps {
 
 export default function Scorecard({ round, holes, onFinishRound, onViewHole }: ScorecardProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [activePlayerIdx, setActivePlayerIdx] = useState(round.activePlayerIdx ?? 0);
+
+  // Check if multiplayer
+  const isMultiplayer = round.players && round.players.length > 1;
+
+  // Get scores for a specific player or the main scores
+  const getScoresForPlayer = (playerIdx: number) => {
+    if (round.players && round.players.length > 0) {
+      return round.players[playerIdx]?.scores || {};
+    }
+    return round.scores;
+  };
+
+  // Calculate totals for a player
+  const calculateTotals = (playerScores: Record<number, any>) => {
+    const totalStrokes = Object.values(playerScores).reduce((acc, s: any) => acc + s.strokes, 0);
+    const scoredHoles = Object.values(playerScores).length;
+    const totalPar = holes.slice(0, scoredHoles).reduce((acc, h) => acc + h.par, 0);
+    const diff = totalStrokes - totalPar;
+    return { totalStrokes, totalPar, diff, scoredHoles };
+  };
+
+  // Get current player's scores
+  const currentPlayerScores = isMultiplayer 
+    ? getScoresForPlayer(activePlayerIdx) 
+    : round.scores;
+  
+  const { totalStrokes, totalPar, diff } = calculateTotals(currentPlayerScores);
 
   // Auto-scroll to bottom when all holes have scores
   useEffect(() => {
-    const allHolesScored = holes.every(hole => round.scores[hole.number]);
+    const allHolesScored = holes.every(hole => currentPlayerScores[hole.number]);
     if (allHolesScored && scrollContainerRef.current) {
       setTimeout(() => {
         scrollContainerRef.current?.scrollTo({ top: scrollContainerRef.current.scrollHeight, behavior: 'smooth' });
       }, 100);
     }
-  }, [round.scores, holes]);
+  }, [currentPlayerScores, holes]);
 
-  const totalPar = holes.reduce((acc, h) => acc + h.par, 0);
-  const totalStrokes = Object.values(round.scores).reduce((acc, s) => acc + s.strokes, 0);
-  const diff = totalStrokes - holes.filter(h => round.scores[h.number]).reduce((acc, h) => acc + h.par, 0);
+  const currentPlayer = isMultiplayer ? round.players![activePlayerIdx] : null;
 
   return (
     <div ref={scrollContainerRef} className="p-4 bg-dark min-h-screen text-slate-100 pb-24 overflow-y-auto h-full">
       <div className="flex items-center justify-between mb-8">
         <h2 className="text-3xl font-[900] flex items-center gap-3 text-lime uppercase italic tracking-tighter">
           <Trophy size={28} />
-          SUMMARY
+          {isMultiplayer ? 'SCORES' : 'SUMMARY'}
         </h2>
         <div className="text-right">
           <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest flex items-center gap-1 justify-end italic">
@@ -41,26 +67,67 @@ export default function Scorecard({ round, holes, onFinishRound, onViewHole }: S
         </div>
       </div>
 
+      {/* Player Tabs for Multiplayer */}
+      {isMultiplayer && round.players && (
+        <div className="flex items-center gap-2 mb-6 overflow-x-auto pb-2">
+          <button 
+            onClick={() => setActivePlayerIdx(Math.max(0, activePlayerIdx - 1))}
+            disabled={activePlayerIdx === 0}
+            className="p-2 text-slate-400 hover:text-white disabled:opacity-30 flex-shrink-0"
+          >
+            <ChevronLeft size={20} />
+          </button>
+          {round.players.map((player, idx) => (
+            <button
+              key={player.id}
+              onClick={() => setActivePlayerIdx(idx)}
+              className={`px-4 py-2 rounded-lg font-bold uppercase text-sm tracking-tight whitespace-nowrap transition-colors flex-shrink-0 ${
+                idx === activePlayerIdx
+                  ? 'bg-lime text-dark'
+                  : 'bg-navy/40 text-slate-300 hover:bg-navy/60'
+              }`}
+            >
+              {player.name}
+            </button>
+          ))}
+          <button 
+            onClick={() => setActivePlayerIdx(Math.min(round.players!.length - 1, activePlayerIdx + 1))}
+            disabled={activePlayerIdx === round.players.length - 1}
+            className="p-2 text-slate-400 hover:text-white disabled:opacity-30 flex-shrink-0"
+          >
+            <ChevronRight size={20} />
+          </button>
+        </div>
+      )}
+
+      {isMultiplayer && currentPlayer && (
+        <div className="mb-2 text-center">
+          <p className="text-sm text-slate-400 uppercase font-bold tracking-wider italic">
+            Playing as: <span className="text-lime">{currentPlayer.name}</span>
+          </p>
+        </div>
+      )}
+
       <div className="grid grid-cols-3 gap-3 mb-10">
         <div className="bg-navy/40 p-4 rounded-2xl border border-white/5 text-center backdrop-blur-sm">
           <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1 italic">Strokes</p>
-          <p className="text-3xl font-[1000] italic leading-none">{totalStrokes}</p>
+          <p className="text-3xl font-[1000] italic leading-none">{totalStrokes || '-'}</p>
         </div>
         <div className="bg-navy/40 p-4 rounded-2xl border border-white/5 text-center backdrop-blur-sm">
           <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1 italic">Par</p>
-          <p className="text-3xl font-[1000] italic leading-none text-white/50">{totalPar}</p>
+          <p className="text-3xl font-[1000] italic leading-none text-white/50">{totalPar || '-'}</p>
         </div>
         <div className="bg-navy/40 p-4 rounded-2xl border border-white/5 text-center backdrop-blur-sm">
           <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1 italic">Rel</p>
-          <p className={`text-3xl font-[1000] italic leading-none ${diff > 0 ? 'text-red-500' : diff < 0 ? 'text-lime underline' : 'text-slate-100'}`}>
-            {diff > 0 ? `+${diff}` : diff === 0 ? 'E' : diff}
+          <p className={`text-3xl font-[1000] italic leading-none ${totalStrokes === 0 ? 'text-slate-400' : diff > 0 ? 'text-red-500' : diff < 0 ? 'text-lime underline' : 'text-slate-100'}`}>
+            {totalStrokes === 0 ? '-' : diff > 0 ? `+${diff}` : diff === 0 ? 'E' : diff}
           </p>
         </div>
       </div>
 
       <div className="space-y-3">
         {holes.map((hole, idx) => {
-          const score = round.scores[hole.number];
+          const score = currentPlayerScores[hole.number];
           return (
             <div 
               key={hole.number}

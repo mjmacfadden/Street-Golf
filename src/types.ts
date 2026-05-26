@@ -19,10 +19,18 @@ export interface Score {
   notes?: string;
 }
 
+export interface Player {
+  id: string;
+  name: string;
+  scores: Record<number, Score>;
+}
+
 export interface Round {
   id: string;
   date: string;
-  scores: Record<number, Score>;
+  scores: Record<number, Score>; // Backward compatibility (single player)
+  players?: Player[]; // Multiplayer support
+  activePlayerIdx?: number; // Current player index
   isCompleted: boolean;
   courseId?: string;
   courseName?: string;
