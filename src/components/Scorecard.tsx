@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Hole, Round, Player } from '../types';
-import { Trophy, Clock, MapPin, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Trophy, Clock, MapPin, ChevronLeft, ChevronRight, Share2 } from 'lucide-react';
+import ScoreShareCard from './ScoreShareCard';
 
 interface ScorecardProps {
   round: Round;
@@ -12,6 +13,8 @@ interface ScorecardProps {
 export default function Scorecard({ round, holes, onFinishRound, onViewHole }: ScorecardProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [activePlayerIdx, setActivePlayerIdx] = useState(round.activePlayerIdx ?? 0);
+  const [isSharing, setIsSharing] = useState(false);
+  const shareCardRef = useRef<HTMLDivElement>(null);
 
   // Check if multiplayer
   const isMultiplayer = round.players && round.players.length > 1;
@@ -58,6 +61,77 @@ export default function Scorecard({ round, holes, onFinishRound, onViewHole }: S
   }, [round.isCompleted]);
 
   const currentPlayer = isMultiplayer ? round.players![activePlayerIdx] : null;
+
+  const handleShareScore = async () => {
+    setIsSharing(true);
+    try {
+      // Generate image from canvas
+      await new Promise((resolve) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 1080;
+        canvas.height = 1920;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.src = '/images/share.png';
+
+        img.onload = () => {
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          ctx.font = 'italic 900 231px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+          ctx.fillStyle = '#5f8804';
+          ctx.textAlign = 'center';
+          ctx.fillText(totalStrokes.toString(), canvas.width / 2, 870);
+
+          ctx.font = 'italic 700 67px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+          ctx.fillStyle = diff < 0 ? '#5f8804' : diff > 0 ? '#EF4444' : '#010409';
+          const parText = diff < 0 ? `${diff} UNDER PAR` : diff > 0 ? `+${diff} OVER PAR` : 'EVEN PAR';
+          ctx.fillText(parText, canvas.width / 2, 970);
+
+          ctx.font = 'bold 700 59px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+          ctx.fillStyle = '#010409';
+          ctx.fillText(round.courseName || 'Unknown Course', canvas.width / 2, 1060);
+
+          ctx.font = '500 46px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+          ctx.fillStyle = '#475569';
+          ctx.fillText(`${round.players?.[activePlayerIdx]?.name || 'Player'} • ${new Date(round.date).toLocaleDateString()}`, canvas.width / 2, 1130);
+
+          ctx.font = '500 42px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+          ctx.fillStyle = '#64748B';
+          ctx.fillText(`Par ${totalPar}`, canvas.width / 2, 1210);
+
+          canvas.toBlob((blob) => {
+            if (!blob) return;
+            if (navigator.share) {
+              const file = new File([blob], `street-golf-score-${round.id}.png`, { type: 'image/png' });
+              navigator.share({
+                title: 'Street Golf Score',
+                text: `Check out my score: ${totalStrokes} (${diff < 0 ? diff : `+${diff}`}) at ${round.courseName}!`,
+                files: [file],
+              }).catch(() => downloadBlob(blob));
+            } else {
+              downloadBlob(blob);
+            }
+            resolve(null);
+          }, 'image/png', 1);
+        };
+      });
+    } catch (error) {
+      console.error('Share failed:', error);
+    } finally {
+      setIsSharing(false);
+    }
+  };
+
+  const downloadBlob = (blob: Blob) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `street-golf-score-${round.id}.png`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div ref={scrollContainerRef} className="p-4 bg-dark min-h-screen text-slate-100 pb-24 overflow-y-auto h-full">
@@ -163,7 +237,18 @@ export default function Scorecard({ round, holes, onFinishRound, onViewHole }: S
       </div>
 
       {onFinishRound && (
-        <div className="mt-10 border-t border-white/10">
+        <div className="mt-10 border-t border-white/10 pt-6 space-y-4">
+          {/* Share Score Button */}
+          <button 
+            onClick={handleShareScore}
+            disabled={isSharing}
+            className="w-full border-2 border-lime text-lime py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-lime/10 transition italic disabled:opacity-50"
+          >
+            <Share2 size={20} />
+            Share Your Score
+          </button>
+
+          {/* Finish Round Button */}
           <button 
             onClick={onFinishRound}
             className="w-full bg-lime text-dark py-4 rounded-xl font-black flex items-center justify-center gap-2 shadow-xl shadow-lime/10 italic"
@@ -173,6 +258,17 @@ export default function Scorecard({ round, holes, onFinishRound, onViewHole }: S
           </button>
         </div>
       )}
+      {/* Hidden ScoreShareCard for reference */}
+      <div ref={shareCardRef} className="hidden">
+        <ScoreShareCard
+          round={round}
+          course={{ id: round.courseId || '', name: round.courseName || 'Unknown Course', holes }}
+          playerName={round.players?.[activePlayerIdx]?.name || 'Player'}
+          playerScore={Object.values(getScoresForPlayer(activePlayerIdx)).reduce((acc: number, s: any) => acc + s.strokes, 0) || 0}
+          playerPar={Object.values(getScoresForPlayer(activePlayerIdx)).length > 0 ? holes.slice(0, Object.values(getScoresForPlayer(activePlayerIdx)).length).reduce((acc, h) => acc + h.par, 0) : 0}
+          playerDiff={calculateTotals(getScoresForPlayer(activePlayerIdx)).diff}
+        />
+      </div>
     </div>
   );
 }
