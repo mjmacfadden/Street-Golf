@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, Play, Heart, Search, X, MapPin, AlertTriangle } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Flag, Heart, Search, X, MapPin, AlertTriangle, Loader } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { AuthModal } from './AuthModal';
@@ -498,10 +498,10 @@ export default function Home({ courses, onSelectCourse, onPlayNow, loading = fal
                       onSelectCourse(currentCourse);
                       onPlayNow();
                     }}
-                    className="flex flex-col items-center gap-3 bg-black/40 hover:bg-black/60 rounded-full p-6 transition backdrop-blur-sm cursor-pointer z-10 pointer-events-auto"
+                    className="flex items-center gap-3 bg-black/40 hover:bg-black/60 rounded-xl px-6 py-4 transition backdrop-blur-sm cursor-pointer z-10 pointer-events-auto"
                   >
-                    <Play size={48} className="text-lime fill-lime" />
-                    <span className="text-white font-bold text-lg">Play Now</span>
+                    <Flag size={32} className="text-white flex-shrink-0" />
+                    <span className="text-white font-bold text-sm">Play Now</span>
                   </button>
                 </motion.div>
 
@@ -510,15 +510,15 @@ export default function Home({ courses, onSelectCourse, onPlayNow, loading = fal
                   <>
                     <button
                       onClick={handlePrevious}
-                      className="absolute left-4 top-1/2 -translate-y-1/2 z-10 p-2 bg-white/20 hover:bg-white/40 rounded-lg backdrop-blur-sm transition"
+                      className="absolute left-4 top-1/2 -translate-y-1/2 z-10 p-2 transition"
                     >
-                      <ChevronLeft size={28} className="text-white" />
+                      <ChevronLeft size={28} className="text-white drop-shadow-lg" />
                     </button>
                     <button
                       onClick={handleNext}
-                      className="absolute right-4 top-1/2 -translate-y-1/2 z-10 p-2 bg-white/20 hover:bg-white/40 rounded-lg backdrop-blur-sm transition"
+                      className="absolute right-4 top-1/2 -translate-y-1/2 z-10 p-2 transition"
                     >
-                      <ChevronRight size={28} className="text-white" />
+                      <ChevronRight size={28} className="text-white drop-shadow-lg" />
                     </button>
                   </>
                 )}
@@ -562,7 +562,7 @@ export default function Home({ courses, onSelectCourse, onPlayNow, loading = fal
                       {getCreatorName(currentCourse) && (
                         <p className="text-dark/60 text-sm">By: {getCreatorName(currentCourse)}</p>
                       )}
-                      {userLocation && currentCourse.holes && currentCourse.holes[0]?.teeLocation && (
+                      {currentCourse.holes && currentCourse.holes[0]?.teeLocation && (
                         <div style={{
                           display: 'inline-flex',
                           alignItems: 'center',
@@ -572,13 +572,19 @@ export default function Home({ courses, onSelectCourse, onPlayNow, loading = fal
                           color: '#999999'
                         }}>
                           <MapPin size={14} style={{ color: '#999999' }} />
-                          {calculateDistance(
-                            userLocation.lat,
-                            userLocation.lng,
-                            currentCourse.holes[0].teeLocation.lat,
-                            currentCourse.holes[0].teeLocation.lng
-                          ).toFixed(1)}{' '}
-                          mi
+                          {userLocation ? (
+                            <>
+                              {calculateDistance(
+                                userLocation.lat,
+                                userLocation.lng,
+                                currentCourse.holes[0].teeLocation.lat,
+                                currentCourse.holes[0].teeLocation.lng
+                              ).toFixed(1)}{' '}
+                              mi
+                            </>
+                          ) : (
+                            <Loader size={14} style={{ color: '#999999', animation: 'spin 1s linear infinite' }} />
+                          )}
                         </div>
                       )}
                     </div>

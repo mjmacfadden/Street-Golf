@@ -130,7 +130,7 @@ export default function AddPlayersModal({ isOpen, onClose, onStart, defaultPlaye
                 disabled={players.length === 0 || !players.every(p => p.trim())}
                 className="flex-1 px-4 py-2 bg-lime text-dark rounded-lg font-bold hover:bg-lime/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
               >
-                Start Round
+                Start
                 <ChevronRight size={18} />
               </button>
             </div>

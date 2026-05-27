@@ -930,8 +930,8 @@ function AppContent() {
           const others = availableCourses.filter(c => c.id !== activeSharedCourseId);
           return [shared, ...others];
         })()
-      : (userLocation ? sortedCourses : availableCourses),
-    [activeSharedCourseId, availableCourses, userLocation, sortedCourses]
+      : (sortedCourses.length > 0 ? sortedCourses : availableCourses),
+    [activeSharedCourseId, availableCourses, sortedCourses]
   );
 
   if (loading) {
