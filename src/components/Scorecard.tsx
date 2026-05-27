@@ -61,7 +61,7 @@ export default function Scorecard({ round, holes, onFinishRound, onViewHole }: S
 
   return (
     <div ref={scrollContainerRef} className="p-4 bg-dark min-h-screen text-slate-100 pb-24 overflow-y-auto h-full">
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-6">
         <h2 className="text-3xl font-[900] flex items-center gap-3 text-lime uppercase italic tracking-tighter">
           <Trophy size={28} />
           {isMultiplayer ? 'SCORES' : 'SUMMARY'}
@@ -74,48 +74,7 @@ export default function Scorecard({ round, holes, onFinishRound, onViewHole }: S
         </div>
       </div>
 
-      {/* Player Tabs for Multiplayer */}
-      {isMultiplayer && round.players && (
-        <div className="flex items-center gap-2 mb-6 overflow-x-auto pb-2">
-          <button 
-            onClick={() => setActivePlayerIdx(Math.max(0, activePlayerIdx - 1))}
-            disabled={activePlayerIdx === 0}
-            className="p-2 text-slate-400 hover:text-white disabled:opacity-30 flex-shrink-0"
-          >
-            <ChevronLeft size={20} />
-          </button>
-          {round.players.map((player, idx) => (
-            <button
-              key={player.id}
-              onClick={() => setActivePlayerIdx(idx)}
-              className={`px-4 py-2 rounded-lg font-bold uppercase text-sm tracking-tight whitespace-nowrap transition-colors flex-shrink-0 ${
-                idx === activePlayerIdx
-                  ? 'bg-lime text-dark'
-                  : 'bg-navy/40 text-slate-300 hover:bg-navy/60'
-              }`}
-            >
-              {player.name}
-            </button>
-          ))}
-          <button 
-            onClick={() => setActivePlayerIdx(Math.min(round.players!.length - 1, activePlayerIdx + 1))}
-            disabled={activePlayerIdx === round.players.length - 1}
-            className="p-2 text-slate-400 hover:text-white disabled:opacity-30 flex-shrink-0"
-          >
-            <ChevronRight size={20} />
-          </button>
-        </div>
-      )}
-
-      {isMultiplayer && currentPlayer && (
-        <div className="mb-2 text-center">
-          <p className="text-sm text-slate-400 uppercase font-bold tracking-wider italic">
-            Playing as: <span className="text-lime">{currentPlayer.name}</span>
-          </p>
-        </div>
-      )}
-
-      <div className="grid grid-cols-3 gap-3 mb-10">
+      <div className="grid grid-cols-3 gap-3 mb-6">
         <div className="bg-navy/40 p-4 rounded-2xl border border-white/5 text-center backdrop-blur-sm">
           <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1 italic">Strokes</p>
           <p className="text-3xl font-[1000] italic leading-none">{totalStrokes || '-'}</p>
@@ -131,6 +90,42 @@ export default function Scorecard({ round, holes, onFinishRound, onViewHole }: S
           </p>
         </div>
       </div>
+
+      {/* Player Tabs for Multiplayer - Moved below score cards */}
+      {isMultiplayer && round.players && (
+        <div className="mb-6">
+          <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-3 italic">Active Player</p>
+          <div className="flex items-center gap-2 overflow-x-auto pb-2">
+            <button 
+              onClick={() => setActivePlayerIdx(Math.max(0, activePlayerIdx - 1))}
+              disabled={activePlayerIdx === 0}
+              className="p-2 text-slate-400 hover:text-white disabled:opacity-30 flex-shrink-0"
+            >
+              <ChevronLeft size={20} />
+            </button>
+            {round.players.map((player, idx) => (
+              <button
+                key={player.id}
+                onClick={() => setActivePlayerIdx(idx)}
+                className={`px-4 py-2 rounded-lg font-bold uppercase text-sm tracking-tight whitespace-nowrap transition-colors flex-shrink-0 ${
+                  idx === activePlayerIdx
+                    ? 'bg-lime text-dark'
+                    : 'bg-navy/40 text-slate-300 hover:bg-navy/60'
+                }`}
+              >
+                {player.name}
+              </button>
+            ))}
+            <button 
+              onClick={() => setActivePlayerIdx(Math.min(round.players!.length - 1, activePlayerIdx + 1))}
+              disabled={activePlayerIdx === round.players.length - 1}
+              className="p-2 text-slate-400 hover:text-white disabled:opacity-30 flex-shrink-0"
+            >
+              <ChevronRight size={20} />
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-3">
         {holes.map((hole, idx) => {

@@ -1129,55 +1129,60 @@ function AppContent() {
                                 </div>
                               </div>
 
-                              <div className="flex items-center justify-between border-t border-white/5 pt-4 mt-2">
-                                <div className="flex items-center gap-3">
-                                  <button 
-                                    onClick={() => setTempScore(Math.max(1, tempScore - 1))}
-                                    className="w-10 h-10 rounded-xl bg-navy border border-white/5 flex items-center justify-center text-xl font-bold hover:bg-navy/80"
-                                  >
-                                    -
-                                  </button>
-                                  <div className="text-center w-8">
-                                    <p className="text-2xl font-black italic">{tempScore}</p>
+                              <div className="flex flex-col gap-3 border-t border-white/5 pt-4 mt-2">
+                                {/* Score Controls and Mark Score Button */}
+                                <div className="flex items-center justify-between gap-3">
+                                  <div className="flex items-center gap-3">
+                                    <button 
+                                      onClick={() => setTempScore(Math.max(1, tempScore - 1))}
+                                      className="w-10 h-10 rounded-xl bg-navy border border-white/5 flex items-center justify-center text-xl font-bold hover:bg-navy/80"
+                                    >
+                                      -
+                                    </button>
+                                    <div className="text-center w-8">
+                                      <p className="text-2xl font-black italic">{tempScore}</p>
+                                    </div>
+                                    <button 
+                                      onClick={() => setTempScore(tempScore + 1)}
+                                      className="w-10 h-10 rounded-xl bg-navy border border-white/5 flex items-center justify-center text-xl font-bold hover:bg-navy/80"
+                                    >
+                                      +
+                                    </button>
                                   </div>
                                   <button 
-                                    onClick={() => setTempScore(tempScore + 1)}
-                                    className="w-10 h-10 rounded-xl bg-navy border border-white/5 flex items-center justify-center text-xl font-bold hover:bg-navy/80"
+                                    onClick={handleSaveScore}
+                                    className="bg-lime text-dark px-5 py-3 rounded-xl font-[900] flex items-center gap-2 hover:bg-lime/90 transition-colors shadow-lg shadow-lime/20 italic whitespace-nowrap"
                                   >
-                                    +
+                                    <Pencil size={18} />
+                                    Mark Score
                                   </button>
-                                  {currentRound?.players && currentRound.players.length > 1 && (
-                                    <div className="ml-auto overflow-x-auto scrollbar-hide">
-                                      <div className="flex gap-2 pb-2">
-                                        {currentRound.players.map((player, idx) => (
-                                          <button
-                                            key={player.id}
-                                            onClick={() => {
-                                              setCurrentRound({ ...currentRound, activePlayerIdx: idx });
-                                              if (currentHoleIdx !== null) {
-                                                setTempScore(currentCourseHoles[currentHoleIdx].par);
-                                              }
-                                            }}
-                                            className={`px-3 py-1 rounded-lg font-bold text-xs uppercase tracking-tight whitespace-nowrap transition-colors ${
-                                              idx === (currentRound.activePlayerIdx ?? 0)
-                                                ? 'bg-lime text-dark'
-                                                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                                            }`}
-                                          >
-                                            {player.name}
-                                          </button>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  )}
                                 </div>
-                                <button 
-                                  onClick={handleSaveScore}
-                                  className="bg-lime text-dark px-5 py-3 rounded-xl font-[900] flex items-center gap-2 hover:bg-lime/90 transition-colors shadow-lg shadow-lime/20 italic"
-                                >
-                                  <Pencil size={18} />
-                                  Mark Score
-                                </button>
+
+                                {/* Player Selector - Below Score Controls */}
+                                {currentRound?.players && currentRound.players.length > 1 && (
+                                  <div className="overflow-x-auto scrollbar-hide -mx-5 px-5">
+                                    <div className="flex gap-2 pb-2">
+                                      {currentRound.players.map((player, idx) => (
+                                        <button
+                                          key={player.id}
+                                          onClick={() => {
+                                            setCurrentRound({ ...currentRound, activePlayerIdx: idx });
+                                            if (currentHoleIdx !== null) {
+                                              setTempScore(currentCourseHoles[currentHoleIdx].par);
+                                            }
+                                          }}
+                                          className={`px-3 py-1 rounded-lg font-bold text-xs uppercase tracking-tight whitespace-nowrap transition-colors ${
+                                            idx === (currentRound.activePlayerIdx ?? 0)
+                                              ? 'bg-lime text-dark'
+                                              : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                                          }`}
+                                        >
+                                          {player.name}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           </motion.div>

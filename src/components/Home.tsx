@@ -7,6 +7,7 @@ import { RatingComponent } from './RatingComponent';
 import { addFavorite, removeFavorite, getUserFavorites } from '../utils/courseService';
 import type { Course as FirestoreCourse } from '../utils/courseService';
 import type { Course } from '../constants/course';
+import type { Round } from '../types';
 import { calculateDistance } from '../utils/distance';
 
 interface HomeProps {
@@ -43,9 +44,21 @@ export default function Home({ courses, onSelectCourse, onPlayNow, loading = fal
   }, [currentUser]);
 
   // Reset carousel to first course when courses array changes (e.g., sorted by distance)
+  // But if a round is active, navigate to that course instead
   useEffect(() => {
+    if (currentRound && !currentRound.isCompleted && currentRound.courseId) {
+      // Find the index of the current course being played
+      const courseIndex = courses.findIndex(c => 
+        ('id' in c ? c.id : c.id) === currentRound.courseId
+      );
+      if (courseIndex !== -1) {
+        setCurrentIndex(courseIndex);
+        return;
+      }
+    }
+    // Default: reset to first course
     setCurrentIndex(0);
-  }, [courses]);
+  }, [courses, currentRound]);
 
   // Update selected course whenever carousel changes
   useEffect(() => {
